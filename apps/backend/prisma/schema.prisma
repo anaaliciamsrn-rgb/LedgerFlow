@@ -29,6 +29,7 @@ model Tenant {
 
   companies    Company[]
   activityLogs ActivityLog[]
+  auditRuns    AuditRun[]
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -49,10 +50,40 @@ model Company {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  auditRuns AuditRun[]
 
   @@unique([tenantId, cnpj])
   @@index([tenantId])
+}
+
+model AuditRun {
+  id        String   @id @default(cuid())
+  tenantId  String
+  companyId String
+  score     Int
+  status    String // healthy | attention | critical
+  createdAt DateTime @default(now())
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  findings AuditFinding[]
+
+  @@index([tenantId, createdAt])
+  @@index([companyId])
+}
+
+model AuditFinding {
+  id         String  @id @default(cuid())
+  auditRunId String
+  code       String
+  severity   String // info | warning | critical
+  message    String
+  passed     Boolean
+
+  auditRun AuditRun @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
+
+  @@index([auditRunId])
 }
 
 model ActivityLog {

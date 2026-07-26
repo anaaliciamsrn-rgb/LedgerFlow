@@ -63,8 +63,10 @@ export async function createTestApp(): Promise<TestContext> {
   return { app, prisma };
 }
 
-/** Limpa todas as tabelas mutáveis entre os testes. */
+/** Limpa todas as tabelas mutáveis entre os testes (ordem de FK). */
 export async function cleanDatabase(prisma: PrismaService): Promise<void> {
+  await prisma.auditFinding.deleteMany();
+  await prisma.auditRun.deleteMany();
   await prisma.activityLog.deleteMany();
   await prisma.company.deleteMany();
   await prisma.tenant.deleteMany();
