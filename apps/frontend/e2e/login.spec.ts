@@ -1,0 +1,69 @@
+import { test, expect } from '@playwright/test';
+
+test.describe('Login', () => {
+  test('renders the login screen', async ({ page }) => {
+    await page.goto('/login');
+
+    await expect(
+      page.getByRole('heading', { name: 'LedgerFlow' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Bem-vinda de volta' }),
+    ).toBeVisible();
+    await expect(page.locator('#email')).toBeVisible();
+    await expect(page.locator('#password')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+  });
+
+  test('associates labels with their inputs (accessibility)', async ({
+    page,
+  }) => {
+    await page.goto('/login');
+    await expect(page.locator('label[for="email"]')).toHaveText('E-mail');
+    await expect(page.locator('label[for="password"]')).toHaveText('Senha');
+  });
+
+  test('shows client-side validation errors on empty submit', async ({
+    page,
+  }) => {
+    await page.goto('/login');
+    await page.getByRole('button', { name: 'Entrar' }).click();
+
+    await expect(page.getByText('Informe seu e-mail')).toBeVisible();
+    await expect(page.getByText('Informe sua senha')).toBeVisible();
+  });
+
+  test('validates the email format', async ({ page }) => {
+    await page.goto('/login');
+    await page.locator('#email').fill('nao-e-email');
+    await page.locator('#password').fill('123456');
+    await page.getByRole('button', { name: 'Entrar' }).click();
+
+    await expect(page.getByText('E-mail inválido')).toBeVisible();
+  });
+
+  test('toggles password visibility', async ({ page }) => {
+    await page.goto('/login');
+    const password = page.locator('#password');
+    await expect(password).toHaveAttribute('type', 'password');
+
+    await page.getByRole('button', { name: 'Mostrar senha' }).click();
+    await expect(password).toHaveAttribute('type', 'text');
+  });
+
+  test('renders correctly on a mobile viewport without horizontal scroll', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto('/login');
+
+    await expect(
+      page.getByRole('heading', { name: 'Bem-vinda de volta' }),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+    const noHorizontalScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth + 1,
+    );
+    expect(noHorizontalScroll).toBe(true);
+  });
+});

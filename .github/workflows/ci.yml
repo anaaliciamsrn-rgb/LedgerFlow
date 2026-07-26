@@ -55,5 +55,29 @@ jobs:
         run: npm run type-check
       - name: Lint
         run: npm run lint
+      - name: Unit tests (Vitest)
+        run: npm test
       - name: Build
         run: npm run build
+
+  e2e:
+    name: Frontend E2E (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/frontend
+    env:
+      NEXT_PUBLIC_API_URL: 'http://localhost:3333/api'
+      NEXT_PUBLIC_USE_MOCKS: 'true'
+      NEXT_PUBLIC_API_TIMEOUT: '30000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: E2E tests
+        run: npm run e2e
