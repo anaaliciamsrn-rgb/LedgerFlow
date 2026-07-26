@@ -1,0 +1,71 @@
+// Prisma schema — Core do Backend (LedgerFlow)
+//
+// Provider = sqlite apenas para dev/testes do Core (sem Docker/Postgres ainda).
+// Quando a frente de Infra entregar o Postgres, trocar `provider` para
+// "postgresql" e o DATABASE_URL. As queries do Core são portáveis (sem SQL
+// específico de Postgres — RLS/policies são responsabilidade da Infra).
+//
+// Enums são modelados como String porque o SQLite não suporta enums no Prisma.
+// A validação dos valores é feita na camada de aplicação (Zod).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Infra-owned (stub para o Core rodar isolado; a versão real —
+// com auth, RLS e roles — é da frente de Infra/DB/Auth).
+// ─────────────────────────────────────────────────────────────
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+
+  companies    Company[]
+  activityLogs ActivityLog[]
+}
+
+// ─────────────────────────────────────────────────────────────
+// Core-owned
+// ─────────────────────────────────────────────────────────────
+model Company {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  tradeName   String
+  cnpj        String
+  status      String   @default("pending") // active | inactive | pending
+  email       String
+  phone       String
+  city        String
+  state       String
+  healthScore Int      @default(100)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, cnpj])
+  @@index([tenantId])
+}
+
+model ActivityLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  actorId    String
+  action     String // ex.: company.created, company.updated, company.deleted
+  entityType String // ex.: company
+  entityId   String
+  metadata   String? // JSON serializado (diffs, contexto)
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+}
