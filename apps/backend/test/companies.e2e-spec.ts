@@ -1,0 +1,243 @@
+import request from 'supertest';
+import {
+  createTestApp,
+  cleanDatabase,
+  seedTenants,
+  companyFactory,
+  TestContext,
+  TENANT_A,
+  TENANT_B,
+} from './test-utils';
+
+describe('Companies (e2e)', () => {
+  let ctx: TestContext;
+
+  beforeAll(async () => {
+    ctx = await createTestApp();
+  });
+
+  afterAll(async () => {
+    await ctx.app.close();
+  });
+
+  beforeEach(async () => {
+    await cleanDatabase(ctx.prisma);
+    await seedTenants(ctx.prisma);
+  });
+
+  const http = () => request(ctx.app.getHttpServer());
+
+  describe('GET /api/companies', () => {
+    it('returns the tenant companies wrapped in the paginated envelope', async () => {
+      await ctx.prisma.company.createMany({
+        data: [
+          companyFactory(TENANT_A, { name: 'Alpha', cnpj: '11111111000111' }),
+          companyFactory(TENANT_A, { name: 'Beta', cnpj: '22222222000122' }),
+        ],
+      });
+
+      const response = await http().get('/api/companies').expect(200);
+
+      expect(response.body.pagination).toEqual({
+        page: 1,
+        pageSize: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(response.body.data).toHaveLength(2);
+      expect(response.body.data[0]).toMatchObject({
+        name: expect.any(String),
+        cnpj: expect.any(String),
+        healthScore: expect.any(Number),
+      });
+      // Não deve vazar campos internos.
+      expect(response.body.data[0].tenantId).toBeUndefined();
+    });
+
+    it('never returns companies from another tenant', async () => {
+      await ctx.prisma.company.create({
+        data: companyFactory(TENANT_B, { name: 'Secreta', cnpj: '33333333000133' }),
+      });
+
+      const response = await http().get('/api/companies').expect(200);
+
+      expect(response.body.data).toHaveLength(0);
+      expect(response.body.pagination.total).toBe(0);
+    });
+
+    it('filters by search across name, tradeName and cnpj', async () => {
+      await ctx.prisma.company.createMany({
+        data: [
+          companyFactory(TENANT_A, { name: 'Padaria Central', cnpj: '44444444000144' }),
+          companyFactory(TENANT_A, { name: 'Mercado Sul', cnpj: '55555555000155' }),
+        ],
+      });
+
+      const response = await http()
+        .get('/api/companies')
+        .query({ search: 'padaria' })
+        .expect(200);
+
+      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data[0].name).toBe('Padaria Central');
+    });
+  });
+
+  describe('POST /api/companies', () => {
+    const validPayload = {
+      name: 'Nova Empresa LTDA',
+      tradeName: 'Nova',
+      cnpj: '66666666000166',
+      status: 'active',
+      email: 'nova@empresa.com.br',
+      phone: '1130000000',
+      city: 'São Paulo',
+      state: 'SP',
+    };
+
+    it('creates a company and returns it in the { data } envelope', async () => {
+      const response = await http()
+        .post('/api/companies')
+        .send(validPayload)
+        .expect(201);
+
+      expect(response.body.data).toMatchObject({
+        name: 'Nova Empresa LTDA',
+        cnpj: '66666666000166',
+        status: 'active',
+      });
+      expect(response.body.data.id).toEqual(expect.any(String));
+
+      const inDb = await ctx.prisma.company.findFirst({
+        where: { tenantId: TENANT_A, cnpj: '66666666000166' },
+      });
+      expect(inDb).not.toBeNull();
+    });
+
+    it('records a company.created activity log for the acting user', async () => {
+      const response = await http()
+        .post('/api/companies')
+        .send(validPayload)
+        .expect(201);
+
+      const logs = await ctx.prisma.activityLog.findMany({
+        where: { tenantId: TENANT_A },
+      });
+      expect(logs).toHaveLength(1);
+      expect(logs[0]).toMatchObject({
+        action: 'company.created',
+        entityType: 'company',
+        entityId: response.body.data.id,
+        actorId: 'usr_test',
+      });
+    });
+
+    it('rejects a duplicate CNPJ within the tenant with 409', async () => {
+      await ctx.prisma.company.create({
+        data: companyFactory(TENANT_A, { cnpj: '66666666000166' }),
+      });
+
+      await http().post('/api/companies').send(validPayload).expect(409);
+    });
+
+    it('rejects an invalid payload with 422 and field-level details', async () => {
+      const response = await http()
+        .post('/api/companies')
+        .send({ ...validPayload, cnpj: '123', email: 'invalido' })
+        .expect(422);
+
+      expect(response.body.code).toBe('VALIDATION_ERROR');
+      expect(response.body.details.cnpj).toBeDefined();
+      expect(response.body.details.email).toBeDefined();
+    });
+  });
+
+  describe('GET /api/companies/:id', () => {
+    it('returns a single company in the { data } envelope', async () => {
+      const created = await ctx.prisma.company.create({
+        data: companyFactory(TENANT_A, { cnpj: '77777777000177' }),
+      });
+
+      const response = await http()
+        .get(`/api/companies/${created.id}`)
+        .expect(200);
+
+      expect(response.body.data).toMatchObject({
+        id: created.id,
+        cnpj: '77777777000177',
+      });
+      expect(response.body.data.tenantId).toBeUndefined();
+    });
+
+    it('returns 404 for an unknown id', async () => {
+      await http().get('/api/companies/cmp_inexistente').expect(404);
+    });
+
+    it('returns 404 when the company belongs to another tenant', async () => {
+      const other = await ctx.prisma.company.create({
+        data: companyFactory(TENANT_B, { cnpj: '88888888000188' }),
+      });
+
+      await http().get(`/api/companies/${other.id}`).expect(404);
+    });
+  });
+
+  describe('PATCH /api/companies/:id', () => {
+    it('updates fields and records a company.updated activity log', async () => {
+      const created = await ctx.prisma.company.create({
+        data: companyFactory(TENANT_A, { cnpj: '99999999000199', status: 'pending' }),
+      });
+
+      const response = await http()
+        .patch(`/api/companies/${created.id}`)
+        .send({ status: 'active' })
+        .expect(200);
+
+      expect(response.body.data.status).toBe('active');
+
+      const logs = await ctx.prisma.activityLog.findMany({
+        where: { action: 'company.updated' },
+      });
+      expect(logs).toHaveLength(1);
+    });
+
+    it('returns 404 when updating another tenant company', async () => {
+      const other = await ctx.prisma.company.create({
+        data: companyFactory(TENANT_B, { cnpj: '10101010000110' }),
+      });
+
+      await http()
+        .patch(`/api/companies/${other.id}`)
+        .send({ status: 'active' })
+        .expect(404);
+    });
+  });
+
+  describe('DELETE /api/companies/:id', () => {
+    it('deletes the company and records a company.deleted activity log', async () => {
+      const created = await ctx.prisma.company.create({
+        data: companyFactory(TENANT_A, { cnpj: '12121212000112' }),
+      });
+
+      await http().delete(`/api/companies/${created.id}`).expect(200);
+
+      const inDb = await ctx.prisma.company.findUnique({
+        where: { id: created.id },
+      });
+      expect(inDb).toBeNull();
+
+      const logs = await ctx.prisma.activityLog.findMany({
+        where: { action: 'company.deleted' },
+      });
+      expect(logs).toHaveLength(1);
+    });
+
+    it('returns 404 when deleting another tenant company', async () => {
+      const other = await ctx.prisma.company.create({
+        data: companyFactory(TENANT_B, { cnpj: '13131313000113' }),
+      });
+
+      await http().delete(`/api/companies/${other.id}`).expect(404);
+    });
+  });
+});
