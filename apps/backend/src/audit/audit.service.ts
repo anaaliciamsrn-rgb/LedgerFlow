@@ -74,7 +74,7 @@ export class AuditService {
     const { page, pageSize } = query;
     const where = { tenantId };
 
-    const [total, rows] = await this.prisma.$transaction([
+    const [total, rows] = await Promise.all([
       this.prisma.auditRun.count({ where }),
       this.prisma.auditRun.findMany({
         where,

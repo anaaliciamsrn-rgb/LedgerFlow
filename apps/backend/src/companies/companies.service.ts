@@ -63,7 +63,9 @@ export class CompaniesService {
       ];
     }
 
-    const [total, rows] = await this.prisma.$transaction([
+    // Leituras paralelas (sem $transaction): evita lock de escrita do SQLite
+    // sob concorrência — melhora drasticamente a cauda de latência (p99).
+    const [total, rows] = await Promise.all([
       this.prisma.company.count({ where }),
       this.prisma.company.findMany({
         where,
