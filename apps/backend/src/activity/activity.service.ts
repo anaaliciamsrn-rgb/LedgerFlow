@@ -1,5 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { paginated, type Paginated } from '../common/pagination';
+import {
+  toActivityDto,
+  type ActivityLogDto,
+  type ListActivityQuery,
+} from './activity.types';
 
 export interface RecordActivityInput {
   readonly tenantId: string;
@@ -29,5 +36,28 @@ export class ActivityService {
         metadata: input.metadata ? JSON.stringify(input.metadata) : null,
       },
     });
+  }
+
+  async list(
+    tenantId: string,
+    query: ListActivityQuery,
+  ): Promise<Paginated<ActivityLogDto>> {
+    const { page, pageSize, entityType } = query;
+    const where: Prisma.ActivityLogWhereInput = { tenantId };
+    if (entityType) {
+      where.entityType = entityType;
+    }
+
+    const [total, rows] = await Promise.all([
+      this.prisma.activityLog.count({ where }),
+      this.prisma.activityLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    return paginated(rows.map(toActivityDto), page, pageSize, total);
   }
 }
