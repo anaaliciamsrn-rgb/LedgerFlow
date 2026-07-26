@@ -8,11 +8,17 @@ const EnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+  NEXT_PUBLIC_API_TIMEOUT: z
+    .string()
+    .default('30000')
+    .transform((value) => Number.parseInt(value, 10))
+    .pipe(z.number().int().positive()),
 });
 
 const parsed = EnvSchema.safeParse({
   NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   NEXT_PUBLIC_USE_MOCKS: process.env.NEXT_PUBLIC_USE_MOCKS,
+  NEXT_PUBLIC_API_TIMEOUT: process.env.NEXT_PUBLIC_API_TIMEOUT,
 });
 
 if (!parsed.success) {
