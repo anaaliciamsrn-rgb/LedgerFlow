@@ -4,16 +4,54 @@ import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { ResponseInterceptor } from '../src/common/interceptors/response.interceptor';
 import { HttpExceptionFilter } from '../src/common/filters/http-exception.filter';
+import { HTTP_FETCHER } from '../src/brasil-api/http-fetcher';
 
 export interface TestContext {
   app: INestApplication;
   prisma: PrismaService;
 }
 
+/**
+ * Fetcher fake programável para a BrasilAPI — evita rede real nos testes.
+ * Defina `brasilApiMock.respondWith` antes de exercitar o endpoint;
+ * `null` (default) simula CNPJ não encontrado (404).
+ */
+export const brasilApiMock: {
+  respondWith: { status: number; body: unknown } | null;
+  fail: boolean;
+  reset(): void;
+} = {
+  respondWith: null,
+  fail: false,
+  reset() {
+    this.respondWith = null;
+    this.fail = false;
+  },
+};
+
+const fakeFetcher = async (): Promise<{
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+}> => {
+  if (brasilApiMock.fail) {
+    throw new Error('BrasilAPI indisponível (simulado)');
+  }
+  const r = brasilApiMock.respondWith ?? { status: 404, body: {} };
+  return {
+    ok: r.status >= 200 && r.status < 300,
+    status: r.status,
+    json: async () => r.body,
+  };
+};
+
 export async function createTestApp(): Promise<TestContext> {
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  })
+    .overrideProvider(HTTP_FETCHER)
+    .useValue(fakeFetcher)
+    .compile();
 
   const app = moduleRef.createNestApplication();
   app.setGlobalPrefix('api');

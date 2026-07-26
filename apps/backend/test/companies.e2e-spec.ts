@@ -4,6 +4,7 @@ import {
   cleanDatabase,
   seedTenants,
   companyFactory,
+  brasilApiMock,
   TestContext,
   TENANT_A,
   TENANT_B,
@@ -23,6 +24,7 @@ describe('Companies (e2e)', () => {
   beforeEach(async () => {
     await cleanDatabase(ctx.prisma);
     await seedTenants(ctx.prisma);
+    brasilApiMock.reset();
   });
 
   const http = () => request(ctx.app.getHttpServer());
@@ -238,6 +240,81 @@ describe('Companies (e2e)', () => {
       });
 
       await http().delete(`/api/companies/${other.id}`).expect(404);
+    });
+  });
+
+  describe('BrasilAPI integration', () => {
+    const RAW_ATIVA = {
+      cnpj: '14141414000114',
+      razao_social: 'Comércio Ativo LTDA',
+      nome_fantasia: 'Ativo',
+      municipio: 'Curitiba',
+      uf: 'PR',
+      descricao_situacao_cadastral: 'ATIVA',
+    };
+
+    it('GET /companies/lookup/:cnpj returns normalized data when found', async () => {
+      brasilApiMock.respondWith = { status: 200, body: RAW_ATIVA };
+
+      const response = await http()
+        .get('/api/companies/lookup/14141414000114')
+        .expect(200);
+
+      expect(response.body.data).toMatchObject({
+        razaoSocial: 'Comércio Ativo LTDA',
+        municipio: 'Curitiba',
+        uf: 'PR',
+        situacao: 'ATIVA',
+      });
+    });
+
+    it('GET /companies/lookup/:cnpj returns null data when not found', async () => {
+      // brasilApiMock default -> 404
+      const response = await http()
+        .get('/api/companies/lookup/00000000000000')
+        .expect(200);
+
+      expect(response.body.data).toBeNull();
+    });
+
+    it('enriches status/healthScore from BrasilAPI when status is left as default', async () => {
+      brasilApiMock.respondWith = { status: 200, body: RAW_ATIVA };
+
+      const response = await http()
+        .post('/api/companies')
+        .send({
+          name: 'Comércio Ativo LTDA',
+          tradeName: 'Ativo',
+          cnpj: '14141414000114',
+          email: 'ativo@empresa.com.br',
+          phone: '4133334444',
+          city: 'Curitiba',
+          state: 'PR',
+          // status omitido -> default 'pending' -> dispara enriquecimento
+        })
+        .expect(201);
+
+      expect(response.body.data.status).toBe('active');
+      expect(response.body.data.healthScore).toBe(90);
+    });
+
+    it('still creates the company when BrasilAPI is unavailable (resilient)', async () => {
+      brasilApiMock.fail = true;
+
+      const response = await http()
+        .post('/api/companies')
+        .send({
+          name: 'Empresa Sem Rede LTDA',
+          tradeName: 'SemRede',
+          cnpj: '15151515000115',
+          email: 'semrede@empresa.com.br',
+          phone: '4133334444',
+          city: 'Curitiba',
+          state: 'PR',
+        })
+        .expect(201);
+
+      expect(response.body.data.status).toBe('pending');
     });
   });
 });

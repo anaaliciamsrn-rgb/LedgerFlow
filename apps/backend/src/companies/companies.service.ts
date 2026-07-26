@@ -6,6 +6,8 @@ import {
 import { Prisma, type Company as PrismaCompany } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
+import { BrasilApiService } from '../brasil-api/brasil-api.service';
+import type { CnpjInfo } from '../brasil-api/brasil-api.types';
 import { paginated, type Paginated } from '../common/pagination';
 import {
   toCompanyDto,
@@ -22,12 +24,29 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
+/** Deriva status e health score inicial da situação cadastral do CNPJ. */
+function deriveFromSituacao(situacao: string): {
+  status: string;
+  healthScore: number;
+} {
+  const active = situacao.trim().toUpperCase() === 'ATIVA';
+  return active
+    ? { status: 'active', healthScore: 90 }
+    : { status: 'inactive', healthScore: 40 };
+}
+
 @Injectable()
 export class CompaniesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activity: ActivityService,
+    private readonly brasilApi: BrasilApiService,
   ) {}
+
+  /** Consulta pública de CNPJ (para o frontend pré-preencher o formulário). */
+  lookupCnpj(cnpj: string): Promise<CnpjInfo | null> {
+    return this.brasilApi.lookupCnpj(cnpj);
+  }
 
   async list(
     tenantId: string,
@@ -66,16 +85,31 @@ export class CompaniesService {
     actorId: string,
     input: CreateCompanyInput,
   ): Promise<CompanyDto> {
+    // Enriquecimento resiliente: só quando o usuário não definiu o status
+    // (ficou no default 'pending'). Falha/timeout da BrasilAPI não bloqueia.
+    const data: Prisma.CompanyUncheckedCreateInput = { ...input, tenantId };
+    let enrichedFrom: string | undefined;
+    if (input.status === 'pending') {
+      const info = await this.brasilApi.lookupCnpj(input.cnpj);
+      if (info) {
+        const derived = deriveFromSituacao(info.situacao);
+        data.status = derived.status;
+        data.healthScore = derived.healthScore;
+        enrichedFrom = info.situacao;
+      }
+    }
+
     try {
-      const company = await this.prisma.company.create({
-        data: { ...input, tenantId },
-      });
+      const company = await this.prisma.company.create({ data });
       await this.activity.record({
         tenantId,
         actorId,
         action: 'company.created',
         entityType: 'company',
         entityId: company.id,
+        metadata: enrichedFrom
+          ? { enrichedFrom: 'brasilapi', situacao: enrichedFrom }
+          : undefined,
       });
       return toCompanyDto(company);
     } catch (error) {

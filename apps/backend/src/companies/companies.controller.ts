@@ -25,11 +25,17 @@ import {
   type UpdateCompanyInput,
 } from './company.schema';
 import type { Paginated } from '../common/pagination';
+import type { CnpjInfo } from '../brasil-api/brasil-api.types';
 
 @Controller('companies')
 @UseGuards(TenantContextGuard)
 export class CompaniesController {
   constructor(private readonly companies: CompaniesService) {}
+
+  @Get('lookup/:cnpj')
+  lookup(@Param('cnpj') cnpj: string): Promise<CnpjInfo | null> {
+    return this.companies.lookupCnpj(cnpj);
+  }
 
   @Get()
   list(
