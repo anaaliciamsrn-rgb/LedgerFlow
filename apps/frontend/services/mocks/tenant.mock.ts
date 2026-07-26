@@ -6,7 +6,7 @@ export const MOCK_TENANT: Tenant = {
   slug: 'acme',
   logoUrl: null,
   theme: {
-    primaryColor: '243 75% 59%',
-    accentColor: '160 84% 39%',
+    primaryColor: '221 83% 53%',
+    accentColor: '214 100% 97%',
   },
 };

@@ -1,9 +1,16 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { Inter } from 'next/font/google';
 import { AppProviders } from '@/providers/app-providers';
 import { authService } from '@/features/auth/services/auth.service';
 import { buildTenantCssVariables, cssVariablesToStyle } from '@/styles/themes';
 import './globals.css';
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'LedgerFlow',
@@ -23,8 +30,8 @@ export default async function RootLayout({
     : undefined;
 
   return (
-    <html lang="pt-BR" suppressHydrationWarning>
-      <body style={themeStyle} className="min-h-screen bg-background antialiased">
+    <html lang="pt-BR" className={inter.variable} suppressHydrationWarning>
+      <body style={themeStyle} className="min-h-screen bg-background font-sans antialiased">
         <AppProviders session={session}>{children}</AppProviders>
       </body>
     </html>
