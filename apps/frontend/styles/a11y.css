@@ -1,0 +1,71 @@
+/* Tamanho da fonte — escala a raiz, tudo em rem acompanha */
+.a11y-font-sm {
+  font-size: 14px;
+}
+.a11y-font-base {
+  font-size: 16px;
+}
+.a11y-font-lg {
+  font-size: 18px;
+}
+
+/* Densidade — variável consumível por componentes de layout */
+.a11y-density-compact {
+  --density-gap: 0.5rem;
+  --density-padding: 0.75rem;
+}
+.a11y-density-normal {
+  --density-gap: 1rem;
+  --density-padding: 1.5rem;
+}
+.a11y-density-comfortable {
+  --density-gap: 1.5rem;
+  --density-padding: 2rem;
+}
+
+/* Redução de movimento — desliga animações e transições */
+.a11y-reduced-motion *,
+.a11y-reduced-motion *::before,
+.a11y-reduced-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Respeita a preferência do sistema mesmo sem toggle manual */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Alto contraste — reforça bordas, texto e foco (WCAG AA/AAA) */
+.a11y-high-contrast {
+  --border: 0 0% 30%;
+  --input: 0 0% 30%;
+  --muted-foreground: 0 0% 25%;
+  --ring: 221 83% 40%;
+}
+.a11y-high-contrast.dark {
+  --border: 0 0% 75%;
+  --input: 0 0% 75%;
+  --muted-foreground: 0 0% 85%;
+  --ring: 210 100% 75%;
+}
+.a11y-high-contrast * {
+  border-color: hsl(var(--border)) !important;
+}
+.a11y-high-contrast a,
+.a11y-high-contrast button {
+  text-decoration-thickness: 2px;
+}
+
+/* Focus ring elegante e sempre visível — nunca remover outline */
+.a11y-high-contrast :focus-visible {
+  outline: 3px solid hsl(var(--ring));
+  outline-offset: 2px;
+}

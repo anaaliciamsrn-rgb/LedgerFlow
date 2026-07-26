@@ -1,0 +1,31 @@
+BLOCO — FUNDAÇÃO DE ACESSIBILIDADE
+====================================
+
+Este pacote adiciona a base de acessibilidade (provider + cookie + CSS).
+Extraia na raiz de apps/frontend com:  unzip -o ~/Downloads/ledgerflow-a11y-base.zip -d .
+
+ARQUIVOS NOVOS (7):
+- features/settings/types/a11y.types.ts
+- features/settings/lib/a11y-cookie.ts
+- features/settings/hooks/use-a11y.ts
+- contexts/a11y.context.ts
+- providers/a11y-provider.tsx
+- styles/a11y.css
+ARQUIVOS SUBSTITUÍDOS (2):
+- providers/app-providers.tsx   (adiciona o A11yProvider)
+- app/layout.tsx                (lê o cookie no servidor)
+
+>>> UMA EDIÇÃO MANUAL NECESSÁRIA <<<
+Abra app/globals.css e adicione ESTA LINHA no topo do arquivo,
+ANTES da linha "@tailwind base;":
+
+    @import '../styles/a11y.css';
+
+Sem isso, as classes de acessibilidade não terão efeito visual.
+
+DEPOIS:
+    npm run type-check
+
+Se der 0 erros, a fundação está pronta. A tela de Configurações
+(onde o usuário liga/desliga as opções) vem no próximo bloco —
+por enquanto a base já funciona e respeita prefers-reduced-motion.
