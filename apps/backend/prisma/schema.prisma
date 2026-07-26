@@ -30,6 +30,7 @@ model Tenant {
   companies    Company[]
   activityLogs ActivityLog[]
   auditRuns    AuditRun[]
+  obligations  Obligation[]
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -50,11 +51,28 @@ model Company {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  auditRuns AuditRun[]
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  auditRuns   AuditRun[]
+  obligations Obligation[]
 
   @@unique([tenantId, cnpj])
   @@index([tenantId])
+}
+
+model Obligation {
+  id        String   @id @default(cuid())
+  tenantId  String
+  companyId String?
+  title     String
+  type      String // ex.: DAS, DCTF, GFIP, FGTS
+  dueDate   DateTime
+  status    String   @default("pending") // pending | completed
+  createdAt DateTime @default(now())
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, dueDate])
 }
 
 model AuditRun {

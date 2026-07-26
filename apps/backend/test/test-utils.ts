@@ -67,6 +67,7 @@ export async function createTestApp(): Promise<TestContext> {
 export async function cleanDatabase(prisma: PrismaService): Promise<void> {
   await prisma.auditFinding.deleteMany();
   await prisma.auditRun.deleteMany();
+  await prisma.obligation.deleteMany();
   await prisma.activityLog.deleteMany();
   await prisma.company.deleteMany();
   await prisma.tenant.deleteMany();
