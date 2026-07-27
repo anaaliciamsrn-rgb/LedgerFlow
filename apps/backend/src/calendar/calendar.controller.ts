@@ -43,7 +43,7 @@ export class CalendarController {
     @CurrentUser() auth: AuthContext,
     @Body(new ZodValidationPipe(createObligationSchema))
     body: CreateObligationInput,
-  ): Promise<ObligationDto> {
+  ): Promise<ObligationDto[]> {
     return this.calendar.create(auth.tenantId, auth.userId, body);
   }
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AuditFinding, AuditRun } from '@prisma/client';
-import type { AuditStatus, Severity } from './audit-engine';
+import type { AuditStatus, FindingResult, Severity } from './audit-engine';
 
 export const listAuditQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -12,7 +12,8 @@ export interface AuditFindingDto {
   readonly code: string;
   readonly severity: Severity;
   readonly message: string;
-  readonly passed: boolean;
+  readonly result: FindingResult;
+  readonly detail: string | null;
 }
 
 export interface AuditRunSummaryDto {
@@ -26,6 +27,15 @@ export interface AuditRunSummaryDto {
 
 export interface AuditRunDetailDto extends AuditRunSummaryDto {
   readonly findings: readonly AuditFindingDto[];
+}
+
+/** Resultado da auditoria da carteira inteira (`POST /audit/run`). */
+export interface PortfolioAuditDto {
+  readonly total: number;
+  readonly healthy: number;
+  readonly attention: number;
+  readonly critical: number;
+  readonly runs: readonly AuditRunSummaryDto[];
 }
 
 export function toSummaryDto(
@@ -55,7 +65,8 @@ export function toDetailDto(
       code: f.code,
       severity: f.severity as Severity,
       message: f.message,
-      passed: f.passed,
+      result: f.result as FindingResult,
+      detail: f.detail,
     })),
   };
 }

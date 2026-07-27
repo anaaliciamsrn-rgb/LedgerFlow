@@ -4,6 +4,7 @@ import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
 import { CommonModule } from './common/common.module';
 import { HealthModule } from './health/health.module';
+import { AuthModule } from './auth/auth.module';
 import { CompaniesModule } from './companies/companies.module';
 import { AuditModule } from './audit/audit.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -19,6 +20,7 @@ import { ActivityModule } from './activity/activity.module';
     PrismaModule,
     CommonModule,
     HealthModule,
+    AuthModule,
     CompaniesModule,
     AuditModule,
     DashboardModule,

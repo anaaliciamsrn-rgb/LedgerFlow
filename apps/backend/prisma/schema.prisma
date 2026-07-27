@@ -25,6 +25,12 @@ model Tenant {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+
+  // White label (spec §4.6): fonte de dados para `buildTenantCssVariables`.
+  logoUrl      String?
+  primaryColor String @default("221 83% 53%")
+  accentColor  String @default("214 100% 97%")
+
   createdAt DateTime @default(now())
 
   companies    Company[]
@@ -39,24 +45,62 @@ model Tenant {
 model Company {
   id          String   @id @default(cuid())
   tenantId    String
-  name        String
-  tradeName   String
+  name        String   // razão social
+  tradeName   String   // nome fantasia
   cnpj        String
-  status      String   @default("pending") // active | inactive | pending
+
+  // `status` = status INTERNO do escritório (controle do usuário).
+  // NÃO confundir com `situacaoCadastral`, que é a situação OFICIAL na
+  // Receita Federal. Foi essa confusão que fez a versão anterior descartar
+  // o dado que o cliente pediu. Os dois campos são DIFERENTES e ambos
+  // permanecem no modelo.
+  status String @default("pending") // active | inactive | pending
+
+  situacaoCadastral String    @default("") // ATIVA | SUSPENSA | INAPTA | BAIXADA | NULA
+  cnaeCodigo        String    @default("")
+  cnaeDescricao     String    @default("")
+  porte             String    @default("") // MEI | ME | EPP | DEMAIS
+  naturezaJuridica  String?
+  dataAbertura      DateTime?
+
   email       String
   phone       String
+  logradouro  String  @default("")
+  numero      String  @default("")
+  complemento String?
+  bairro      String  @default("")
+  cep         String  @default("")
   city        String
   state       String
-  healthScore Int      @default(100)
+
+  healthScore Int      @default(100) // score da auditoria
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  partners    Partner[]
   auditRuns   AuditRun[]
   obligations Obligation[]
 
   @@unique([tenantId, cnpj])
   @@index([tenantId])
+  @@index([tenantId, state])
+  @@index([tenantId, porte])
+  @@index([tenantId, situacaoCadastral])
+  @@index([tenantId, cnaeCodigo])
+}
+
+/// Quadro societário (QSA) vindo da BrasilAPI.
+model Partner {
+  id           String  @id @default(cuid())
+  companyId    String
+  nome         String
+  qualificacao String
+  faixaEtaria  String?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
 }
 
 model Obligation {
@@ -67,12 +111,17 @@ model Obligation {
   type      String // ex.: DAS, DCTF, GFIP, FGTS
   dueDate   DateTime
   status    String   @default("pending") // pending | completed
+
+  assignee          String  @default("")
+  recurrenceGroupId String?
+
   createdAt DateTime @default(now())
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, dueDate])
+  @@index([tenantId, assignee])
 }
 
 model AuditRun {
@@ -97,7 +146,8 @@ model AuditFinding {
   code       String
   severity   String // info | warning | critical
   message    String
-  passed     Boolean
+  result     String // passed | failed | skipped
+  detail     String?
 
   auditRun AuditRun @relation(fields: [auditRunId], references: [id], onDelete: Cascade)
 

@@ -16,7 +16,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'LedgerFlow',
+  title: 'Plataforma Contábil',
   description:
     'Plataforma de gestão contábil multi-tenant para escritórios de contabilidade',
 };
