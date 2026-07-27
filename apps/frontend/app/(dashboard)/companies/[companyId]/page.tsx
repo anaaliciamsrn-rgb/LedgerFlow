@@ -1,5 +1,14 @@
-import { ComingSoon } from '@/components/ui/coming-soon';
+import type { ReactNode } from 'react';
+import { CompanyDetailView } from '@/features/companies/components/company-detail-view';
 
-export default function CompanyDetailPage(): React.ReactNode {
-  return <ComingSoon title="Detalhe da empresa" />;
+interface CompanyDetailPageProps {
+  readonly params: Promise<{ readonly companyId: string }>;
+}
+
+export default async function CompanyDetailPage({
+  params,
+}: CompanyDetailPageProps): Promise<ReactNode> {
+  const { companyId } = await params;
+
+  return <CompanyDetailView companyId={companyId} />;
 }
