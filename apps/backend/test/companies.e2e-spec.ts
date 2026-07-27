@@ -83,6 +83,68 @@ describe('Companies (e2e)', () => {
       expect(response.body.data).toHaveLength(1);
       expect(response.body.data[0].name).toBe('Padaria Central');
     });
+
+    it('filters by porte', async () => {
+      await ctx.prisma.company.createMany({
+        data: [
+          {
+            ...companyFactory(TENANT_A, { cnpj: '20202020000120' }),
+            porte: 'ME',
+          },
+          {
+            ...companyFactory(TENANT_A, { cnpj: '21212121000121' }),
+            porte: 'EPP',
+          },
+        ],
+      });
+
+      const response = await http().get('/api/companies?porte=ME').expect(200);
+
+      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data[0].porte).toBe('ME');
+    });
+
+    it('filters by situacao cadastral', async () => {
+      await ctx.prisma.company.createMany({
+        data: [
+          {
+            ...companyFactory(TENANT_A, { cnpj: '22222222000123' }),
+            situacaoCadastral: 'ATIVA',
+          },
+          {
+            ...companyFactory(TENANT_A, { cnpj: '23232323000123' }),
+            situacaoCadastral: 'BAIXADA',
+          },
+        ],
+      });
+
+      const response = await http()
+        .get('/api/companies?situacao=BAIXADA')
+        .expect(200);
+
+      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data[0].situacaoCadastral).toBe('BAIXADA');
+    });
+
+    it('never leaks another tenant company when filtering by porte', async () => {
+      await ctx.prisma.company.createMany({
+        data: [
+          {
+            ...companyFactory(TENANT_A, { cnpj: '24242424000124' }),
+            porte: 'ME',
+          },
+          {
+            ...companyFactory(TENANT_B, { cnpj: '25252525000125' }),
+            porte: 'ME',
+          },
+        ],
+      });
+
+      const response = await http().get('/api/companies?porte=ME').expect(200);
+
+      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data[0].cnpj).toBe('24242424000124');
+    });
   });
 
   describe('POST /api/companies', () => {
@@ -151,6 +213,77 @@ describe('Companies (e2e)', () => {
       expect(response.body.code).toBe('VALIDATION_ERROR');
       expect(response.body.details.cnpj).toBeDefined();
       expect(response.body.details.email).toBeDefined();
+    });
+
+    it('persists the official fields and the shareholder structure (QSA) coming from BrasilAPI', async () => {
+      brasilApiMock.respondWith = {
+        status: 200,
+        body: {
+          cnpj: '33000167000101',
+          razao_social: 'PETROLEO BRASILEIRO S A PETROBRAS',
+          nome_fantasia: 'PETROBRAS',
+          descricao_situacao_cadastral: 'ATIVA',
+          cnae_fiscal: 1921700,
+          cnae_fiscal_descricao: 'Refino de petróleo',
+          porte: 'DEMAIS',
+          natureza_juridica: 'Sociedade Anônima Aberta',
+          data_inicio_atividade: '1953-10-03',
+          logradouro: 'REPUBLICA DO CHILE',
+          numero: '65',
+          bairro: 'CENTRO',
+          cep: '20031912',
+          municipio: 'RIO DE JANEIRO',
+          uf: 'RJ',
+          qsa: [
+            { nome_socio: 'FULANO', qualificacao_socio: 'Diretor' },
+            { nome_socio: 'CICLANA', qualificacao_socio: 'Sócia', faixa_etaria: '31 a 40 anos' },
+          ],
+        },
+      };
+
+      const response = await http()
+        .post('/api/companies')
+        .send({
+          name: 'PETROLEO BRASILEIRO S A PETROBRAS',
+          tradeName: 'PETROBRAS',
+          cnpj: '33000167000101',
+          email: 'contato@petrobras.com.br',
+          phone: '2132242000',
+          city: 'Rio de Janeiro',
+          state: 'RJ',
+        })
+        .expect(201);
+
+      expect(response.body.data).toMatchObject({
+        situacaoCadastral: 'ATIVA',
+        cnaeCodigo: '1921700',
+        cnaeDescricao: 'Refino de petróleo',
+        porte: 'DEMAIS',
+        naturezaJuridica: 'Sociedade Anônima Aberta',
+        logradouro: 'REPUBLICA DO CHILE',
+        numero: '65',
+        bairro: 'CENTRO',
+        cep: '20031912',
+      });
+      expect(response.body.data.dataAbertura).toContain('1953-10-03');
+      expect(response.body.data.partners).toHaveLength(2);
+      expect(response.body.data.partners[0]).toMatchObject({
+        nome: 'FULANO',
+        qualificacao: 'Diretor',
+        faixaEtaria: null,
+      });
+      expect(response.body.data.partners[1]).toMatchObject({
+        nome: 'CICLANA',
+        qualificacao: 'Sócia',
+        faixaEtaria: '31 a 40 anos',
+      });
+
+      const inDb = await ctx.prisma.company.findFirst({
+        where: { tenantId: TENANT_A, cnpj: '33000167000101' },
+        include: { partners: true },
+      });
+      expect(inDb?.cnaeCodigo).toBe('1921700');
+      expect(inDb?.partners).toHaveLength(2);
     });
   });
 

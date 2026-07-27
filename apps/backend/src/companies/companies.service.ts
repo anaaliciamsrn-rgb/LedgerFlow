@@ -3,15 +3,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, type Company as PrismaCompany } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
 import { BrasilApiService } from '../brasil-api/brasil-api.service';
-import type { CnpjInfo } from '../brasil-api/brasil-api.types';
+import type { CnpjInfo, PartnerInfo } from '../brasil-api/brasil-api.types';
 import { paginated, type Paginated } from '../common/pagination';
 import {
   toCompanyDto,
   type CompanyDto,
+  type CompanyWithPartners,
   type CreateCompanyInput,
   type ListCompaniesQuery,
   type UpdateCompanyInput,
@@ -24,15 +25,32 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
-/** Deriva status e health score inicial da situação cadastral do CNPJ. */
-function deriveFromSituacao(situacao: string): {
-  status: string;
-  healthScore: number;
-} {
-  const active = situacao.trim().toUpperCase() === 'ATIVA';
-  return active
-    ? { status: 'active', healthScore: 90 }
-    : { status: 'inactive', healthScore: 40 };
+/**
+ * Traduz a resposta oficial da BrasilAPI para colunas da tabela.
+ * `status` (interno) e `healthScore` continuam derivados da situação
+ * cadastral oficial na criação — o usuário pode sobrescrever depois via
+ * PATCH. Os demais campos (CNAE, porte, endereço...) são só o espelho dos
+ * dados oficiais.
+ */
+function fromCnpjInfo(
+  info: CnpjInfo,
+): Partial<Prisma.CompanyUncheckedCreateInput> {
+  const active = info.situacao.trim().toUpperCase() === 'ATIVA';
+  return {
+    status: active ? 'active' : 'inactive',
+    healthScore: active ? 90 : 40,
+    situacaoCadastral: info.situacao,
+    cnaeCodigo: info.cnaeCodigo,
+    cnaeDescricao: info.cnaeDescricao,
+    porte: info.porte,
+    naturezaJuridica: info.naturezaJuridica,
+    dataAbertura: info.dataAbertura ? new Date(info.dataAbertura) : null,
+    logradouro: info.logradouro,
+    numero: info.numero,
+    complemento: info.complemento,
+    bairro: info.bairro,
+    cep: info.cep,
+  };
 }
 
 @Injectable()
@@ -62,6 +80,18 @@ export class CompaniesService {
         { cnpj: { contains: search } },
       ];
     }
+    if (query.state) {
+      where.state = query.state;
+    }
+    if (query.porte) {
+      where.porte = query.porte;
+    }
+    if (query.situacao) {
+      where.situacaoCadastral = query.situacao;
+    }
+    if (query.cnae) {
+      where.cnaeCodigo = query.cnae;
+    }
 
     // Leituras paralelas (sem $transaction): evita lock de escrita do SQLite
     // sob concorrência — melhora drasticamente a cauda de latência (p99).
@@ -87,22 +117,39 @@ export class CompaniesService {
     actorId: string,
     input: CreateCompanyInput,
   ): Promise<CompanyDto> {
-    // Enriquecimento resiliente: só quando o usuário não definiu o status
-    // (ficou no default 'pending'). Falha/timeout da BrasilAPI não bloqueia.
     const data: Prisma.CompanyUncheckedCreateInput = { ...input, tenantId };
+    let socios: readonly PartnerInfo[] = [];
     let enrichedFrom: string | undefined;
-    if (input.status === 'pending') {
-      const info = await this.brasilApi.lookupCnpj(input.cnpj);
-      if (info) {
-        const derived = deriveFromSituacao(info.situacao);
-        data.status = derived.status;
-        data.healthScore = derived.healthScore;
-        enrichedFrom = info.situacao;
-      }
+
+    // Enriquecimento resiliente: consulta SEMPRE a BrasilAPI ao cadastrar,
+    // para preencher os campos oficiais (CNAE, porte, endereço, situação e
+    // quadro societário) a partir do CNPJ informado. Falha/timeout da
+    // BrasilAPI nunca bloqueia o cadastro — os campos oficiais simplesmente
+    // ficam vazios e o usuário completa manualmente depois.
+    const info = await this.brasilApi.lookupCnpj(input.cnpj);
+    if (info) {
+      Object.assign(data, fromCnpjInfo(info));
+      socios = info.socios;
+      enrichedFrom = info.situacao;
     }
 
     try {
-      const company = await this.prisma.company.create({ data });
+      const company = await this.prisma.company.create({
+        data: {
+          ...data,
+          partners: socios.length
+            ? {
+                create: socios.map((s) => ({
+                  nome: s.nome,
+                  qualificacao: s.qualificacao,
+                  faixaEtaria: s.faixaEtaria,
+                })),
+              }
+            : undefined,
+        },
+        include: { partners: true },
+      });
+
       await this.activity.record({
         tenantId,
         actorId,
@@ -133,6 +180,7 @@ export class CompaniesService {
       const company = await this.prisma.company.update({
         where: { id },
         data: input,
+        include: { partners: true },
       });
       await this.activity.record({
         tenantId,
@@ -172,9 +220,10 @@ export class CompaniesService {
   private async ensureOwned(
     tenantId: string,
     id: string,
-  ): Promise<PrismaCompany> {
+  ): Promise<CompanyWithPartners> {
     const company = await this.prisma.company.findFirst({
       where: { id, tenantId },
+      include: { partners: true },
     });
     if (!company) {
       throw new NotFoundException('Empresa não encontrada');
