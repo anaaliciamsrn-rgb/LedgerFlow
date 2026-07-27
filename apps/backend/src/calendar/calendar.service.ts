@@ -1,7 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Obligation, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
+import { HolidaysService } from '../brasil-api/holidays.service';
+import { generateOccurrences } from './recurrence';
 import {
   toObligationDto,
   type CreateObligationInput,
@@ -10,11 +13,14 @@ import {
   type UpdateObligationInput,
 } from './calendar.schema';
 
+const createRecurrenceGroupId = (): string => `rec_${randomUUID()}`;
+
 @Injectable()
 export class CalendarService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activity: ActivityService,
+    private readonly holidays: HolidaysService,
   ) {}
 
   async list(
@@ -31,37 +37,84 @@ export class CalendarService {
     if (query.status) {
       where.status = query.status;
     }
+    if (query.assignee) {
+      where.assignee = query.assignee;
+    }
 
     const rows = await this.prisma.obligation.findMany({
       where,
       orderBy: { dueDate: 'asc' },
     });
+
+    const holidays = await this.holidaysForYearsOf(rows);
     const now = new Date();
-    return rows.map((row) => toObligationDto(row, now));
+    return rows.map((row) => toObligationDto(row, now, holidays));
   }
 
+  /** Materializa as ocorrências da recorrência (decisão B1 da spec). */
   async create(
     tenantId: string,
     actorId: string,
     input: CreateObligationInput,
-  ): Promise<ObligationDto> {
-    const obligation = await this.prisma.obligation.create({
-      data: {
+  ): Promise<ObligationDto[]> {
+    const dates = generateOccurrences(
+      input.dueDate,
+      input.recurrence,
+      input.occurrences,
+    );
+    const recurrenceGroupId =
+      input.recurrence === 'none' ? null : createRecurrenceGroupId();
+
+    await this.prisma.obligation.createMany({
+      data: dates.map((dueDate) => ({
         tenantId,
         title: input.title,
         type: input.type,
-        dueDate: input.dueDate,
+        dueDate,
         companyId: input.companyId ?? null,
-      },
+        assignee: input.assignee,
+        recurrenceGroupId,
+      })),
     });
+
+    const created = await this.prisma.obligation.findMany({
+      where: recurrenceGroupId
+        ? { tenantId, recurrenceGroupId }
+        : { tenantId, title: input.title, dueDate: dates[0] },
+      orderBy: { dueDate: 'asc' },
+    });
+
     await this.activity.record({
       tenantId,
       actorId,
       action: 'obligation.created',
       entityType: 'obligation',
-      entityId: obligation.id,
+      entityId: created[0]?.id ?? '',
+      metadata: { occurrences: created.length, recurrence: input.recurrence },
     });
-    return toObligationDto(obligation);
+
+    const holidays = await this.holidaysForYearsOf(created);
+    const now = new Date();
+    return created.map((row) => toObligationDto(row, now, holidays));
+  }
+
+  /**
+   * Busca os feriados uma vez por ano presente no resultado — o cache do
+   * `HolidaysService` cuida de não repetir a chamada para o mesmo ano.
+   * Se a BrasilAPI cair, `HolidaysService` devolve mapa vazio e
+   * `holidayConflict` fica `null` em tudo; o calendário nunca lança por isso.
+   */
+  private async holidaysForYearsOf(
+    rows: readonly Obligation[],
+  ): Promise<Map<string, string>> {
+    const years = [...new Set(rows.map((row) => row.dueDate.getUTCFullYear()))];
+    const holidays = new Map<string, string>();
+    for (const year of years) {
+      for (const [date, name] of await this.holidays.listByYear(year)) {
+        holidays.set(date, name);
+      }
+    }
+    return holidays;
   }
 
   async update(
@@ -82,7 +135,8 @@ export class CalendarService {
       entityType: 'obligation',
       entityId: id,
     });
-    return toObligationDto(obligation);
+    const holidays = await this.holidaysForYearsOf([obligation]);
+    return toObligationDto(obligation, new Date(), holidays);
   }
 
   private async ensureOwned(
