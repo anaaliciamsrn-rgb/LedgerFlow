@@ -17,6 +17,7 @@ import {
   type AuditRunDetailDto,
   type AuditRunSummaryDto,
   type ListAuditQuery,
+  type PortfolioAuditDto,
 } from './audit.types';
 import type { Paginated } from '../common/pagination';
 
@@ -32,6 +33,14 @@ export class AuditController {
     query: ListAuditQuery,
   ): Promise<Paginated<AuditRunSummaryDto>> {
     return this.audit.list(tenantId, query);
+  }
+
+  @Post('run')
+  runPortfolio(
+    @TenantId() tenantId: string,
+    @CurrentUser() user: AuthContext,
+  ): Promise<PortfolioAuditDto> {
+    return this.audit.runForPortfolio(tenantId, user.userId);
   }
 
   @Get(':id')

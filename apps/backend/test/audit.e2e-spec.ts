@@ -32,7 +32,12 @@ describe('Audit (e2e)', () => {
   describe('POST /api/audit/companies/:companyId', () => {
     it('runs an audit, returns findings and updates the company healthScore', async () => {
       const company = await ctx.prisma.company.create({
-        data: companyFactory(TENANT_A, { cnpj: '11222333000181', healthScore: 50 }),
+        data: {
+          ...companyFactory(TENANT_A, { cnpj: '11222333000181', healthScore: 50 }),
+          situacaoCadastral: 'ATIVA',
+          cnaeCodigo: '4721102',
+          porte: 'ME',
+        },
       });
 
       const response = await http()
@@ -41,7 +46,7 @@ describe('Audit (e2e)', () => {
 
       expect(response.body.data.score).toBe(100);
       expect(response.body.data.status).toBe('healthy');
-      expect(response.body.data.findings).toHaveLength(5);
+      expect(response.body.data.findings).toHaveLength(6);
 
       const reloaded = await ctx.prisma.company.findUnique({
         where: { id: company.id },
@@ -78,7 +83,7 @@ describe('Audit (e2e)', () => {
       expect(response.body.data[0]).toMatchObject({
         companyId: company.id,
         score: expect.any(Number),
-        findingsCount: 5,
+        findingsCount: 6,
       });
     });
 
@@ -114,7 +119,15 @@ describe('Audit (e2e)', () => {
       const response = await http().get(`/api/audit/${runId}`).expect(200);
 
       expect(response.body.data.id).toBe(runId);
-      expect(response.body.data.findings).toHaveLength(5);
+      expect(response.body.data.findings).toHaveLength(6);
+      expect(response.body.data.findings[0]).toEqual(
+        expect.objectContaining({
+          code: expect.any(String),
+          severity: expect.any(String),
+          message: expect.any(String),
+          result: expect.stringMatching(/^(passed|failed|skipped)$/),
+        }),
+      );
     });
 
     it('returns 404 for a run from another tenant', async () => {
@@ -131,6 +144,130 @@ describe('Audit (e2e)', () => {
       });
 
       await http().get(`/api/audit/${run.id}`).expect(404);
+    });
+  });
+
+  describe('POST /api/audit/run', () => {
+    it('audita a carteira inteira e resume por status', async () => {
+      brasilApiMock.respondWith = {
+        status: 200,
+        body: {
+          cnpj: '33000167000101',
+          razao_social: 'EMPRESA CERTA LTDA',
+          descricao_situacao_cadastral: 'ATIVA',
+          logradouro: 'RUA A',
+          numero: '1',
+          bairro: 'CENTRO',
+          cep: '01001000',
+          municipio: 'SAO PAULO',
+          uf: 'SP',
+        },
+      };
+
+      await ctx.prisma.company.create({
+        data: {
+          ...companyFactory(TENANT_A, {
+            cnpj: '33000167000101',
+            name: 'EMPRESA CERTA LTDA',
+          }),
+          situacaoCadastral: 'ATIVA',
+          cnaeCodigo: '4721102',
+          porte: 'ME',
+          logradouro: 'RUA A',
+          numero: '1',
+          bairro: 'CENTRO',
+          cep: '01001000',
+          city: 'SAO PAULO',
+          state: 'SP',
+        },
+      });
+
+      const response = await http().post('/api/audit/run').expect(201);
+
+      expect(response.body.data.total).toBe(1);
+      expect(response.body.data.runs).toHaveLength(1);
+      expect(response.body.data.runs[0].score).toBe(100);
+      expect(response.body.data.healthy).toBe(1);
+      expect(response.body.data.attention).toBe(0);
+      expect(response.body.data.critical).toBe(0);
+
+      const reloaded = await ctx.prisma.company.findFirst({
+        where: { tenantId: TENANT_A, cnpj: '33000167000101' },
+      });
+      expect(reloaded?.healthScore).toBe(100);
+    });
+
+    it('devolve total zero e não audita empresas de outro tenant', async () => {
+      await ctx.prisma.company.create({
+        data: companyFactory(TENANT_B, { cnpj: '47960950000121' }),
+      });
+
+      const response = await http().post('/api/audit/run').expect(201);
+
+      expect(response.body.data.total).toBe(0);
+      expect(response.body.data.runs).toHaveLength(0);
+
+      const runsForTenantB = await ctx.prisma.auditRun.findMany({
+        where: { tenantId: TENANT_B },
+      });
+      expect(runsForTenantB).toHaveLength(0);
+    });
+
+    it('marca regras da BrasilAPI como skipped quando ela está fora, sem derrubar a auditoria', async () => {
+      brasilApiMock.fail = true;
+      // CNPJ inédito neste arquivo: o cache in-memory da BrasilAPI é
+      // reaproveitado entre testes (mesma instância de app), então reusar um
+      // CNPJ já consultado com sucesso mascararia a falha simulada aqui.
+      await ctx.prisma.company.create({
+        data: {
+          ...companyFactory(TENANT_A, { cnpj: '71673990000177' }),
+          situacaoCadastral: 'ATIVA',
+          cnaeCodigo: '4721102',
+          porte: 'ME',
+        },
+      });
+
+      const response = await http().post('/api/audit/run').expect(201);
+      const detail = await http()
+        .get(`/api/audit/${response.body.data.runs[0].id}`)
+        .expect(200);
+
+      const skipped = detail.body.data.findings.filter(
+        (f: { result: string }) => f.result === 'skipped',
+      );
+      expect(skipped).toHaveLength(2);
+      expect(
+        skipped.every((f: { detail: string | null }) => f.detail !== null),
+      ).toBe(true);
+      // Regras que não dependem da BrasilAPI continuam avaliadas normalmente.
+      expect(response.body.data.runs[0].score).toBe(100);
+      expect(response.body.data.healthy).toBe(1);
+    });
+
+    it('detecta empresas duplicadas comparando a carteira inteira', async () => {
+      await ctx.prisma.company.createMany({
+        data: [
+          companyFactory(TENANT_A, {
+            cnpj: '11222333000181',
+            name: 'Transportes Rápido EIRELI',
+          }),
+          companyFactory(TENANT_A, {
+            cnpj: '07526557000100',
+            name: 'Transportes Rápido EIRELI',
+          }),
+        ],
+      });
+
+      const response = await http().post('/api/audit/run').expect(201);
+
+      expect(response.body.data.total).toBe(2);
+      for (const run of response.body.data.runs) {
+        const detail = await http().get(`/api/audit/${run.id}`).expect(200);
+        const duplicada = detail.body.data.findings.find(
+          (f: { code: string }) => f.code === 'empresa_duplicada',
+        );
+        expect(duplicada.result).toBe('failed');
+      }
     });
   });
 });

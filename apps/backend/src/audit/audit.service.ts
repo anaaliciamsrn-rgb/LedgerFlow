@@ -1,22 +1,97 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ActivityService } from '../activity/activity.service';
+import { BrasilApiService } from '../brasil-api/brasil-api.service';
 import { paginated, type Paginated } from '../common/pagination';
-import { runAudit } from './audit-engine';
+import { mapWithConcurrency } from '../common/concurrency';
+import { runAudit, normalizeName, type AuditContext } from './audit-engine';
 import {
   toDetailDto,
   toSummaryDto,
   type AuditRunDetailDto,
   type AuditRunSummaryDto,
   type ListAuditQuery,
+  type PortfolioAuditDto,
 } from './audit.types';
+
+/** Concorrência máxima ao persistir auditorias da carteira (spec §2.1). */
+const AUDIT_CONCURRENCY = 5;
 
 @Injectable()
 export class AuditService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly activity: ActivityService,
+    private readonly brasilApi: BrasilApiService,
   ) {}
+
+  /**
+   * Audita a carteira inteira (decisão A2 da spec): reconsulta a BrasilAPI
+   * com concorrência limitada e detecta duplicatas comparando as empresas
+   * entre si — o que só é possível com a carteira toda em mãos. Nunca corrige
+   * nada sozinho; apenas relata as divergências para o usuário decidir.
+   */
+  async runForPortfolio(
+    tenantId: string,
+    actorId: string,
+  ): Promise<PortfolioAuditDto> {
+    const companies = await this.prisma.company.findMany({
+      where: { tenantId },
+    });
+
+    if (companies.length === 0) {
+      return { total: 0, healthy: 0, attention: 0, critical: 0, runs: [] };
+    }
+
+    const official = await this.brasilApi.lookupMany(
+      companies.map((c) => c.cnpj),
+    );
+
+    // Índice de duplicatas: mesmo CNPJ ou mesma razão social normalizada.
+    const byKey = new Map<string, string[]>();
+    for (const company of companies) {
+      for (const key of [
+        `cnpj:${company.cnpj}`,
+        `name:${normalizeName(company.name)}`,
+      ]) {
+        byKey.set(key, [...(byKey.get(key) ?? []), company.id]);
+      }
+    }
+
+    const runs = await mapWithConcurrency(companies, AUDIT_CONCURRENCY, async (company) => {
+      const duplicateOf = [
+        ...new Set(
+          [`cnpj:${company.cnpj}`, `name:${normalizeName(company.name)}`]
+            .flatMap((key) => byKey.get(key) ?? [])
+            .filter((id) => id !== company.id),
+        ),
+      ];
+
+      const context: AuditContext = {
+        official: official.get(company.cnpj) ?? null,
+        duplicateOf,
+      };
+
+      return this.persistRun(tenantId, company.id, runAudit(company, context));
+    });
+
+    await this.activity.record({
+      tenantId,
+      actorId,
+      action: 'audit.portfolio_completed',
+      entityType: 'tenant',
+      entityId: tenantId,
+      metadata: { total: runs.length },
+    });
+
+    return {
+      total: runs.length,
+      healthy: runs.filter((r) => r.status === 'healthy').length,
+      attention: runs.filter((r) => r.status === 'attention').length,
+      critical: runs.filter((r) => r.status === 'critical').length,
+      runs,
+    };
+  }
 
   async runForCompany(
     tenantId: string,
@@ -30,30 +105,25 @@ export class AuditService {
       throw new NotFoundException('Empresa não encontrada');
     }
 
-    const result = runAudit(company);
-
-    const run = await this.prisma.auditRun.create({
-      data: {
+    const duplicates = await this.prisma.company.findMany({
+      where: {
         tenantId,
-        companyId,
-        score: result.score,
-        status: result.status,
-        findings: {
-          create: result.findings.map((f) => ({
-            code: f.code,
-            severity: f.severity,
-            message: f.message,
-            passed: f.passed,
-          })),
-        },
+        id: { not: companyId },
+        OR: [{ cnpj: company.cnpj }, { name: company.name }],
       },
-      include: { findings: true },
+      select: { id: true },
     });
 
-    await this.prisma.company.update({
-      where: { id: companyId },
-      data: { healthScore: result.score },
-    });
+    const context: AuditContext = {
+      official: await this.brasilApi.lookupCnpj(company.cnpj),
+      duplicateOf: duplicates.map((d) => d.id),
+    };
+
+    const summary = await this.persistRun(
+      tenantId,
+      companyId,
+      runAudit(company, context),
+    );
 
     await this.activity.record({
       tenantId,
@@ -61,10 +131,10 @@ export class AuditService {
       action: 'audit.completed',
       entityType: 'company',
       entityId: companyId,
-      metadata: { score: result.score, status: result.status },
+      metadata: { score: summary.score, status: summary.status },
     });
 
-    return toDetailDto(run);
+    return this.getById(tenantId, summary.id);
   }
 
   async list(
@@ -97,5 +167,38 @@ export class AuditService {
       throw new NotFoundException('Auditoria não encontrada');
     }
     return toDetailDto(run);
+  }
+
+  /** Grava o resultado da auditoria e atualiza o score da empresa. */
+  private async persistRun(
+    tenantId: string,
+    companyId: string,
+    result: ReturnType<typeof runAudit>,
+  ): Promise<AuditRunSummaryDto> {
+    const run = await this.prisma.auditRun.create({
+      data: {
+        tenantId,
+        companyId,
+        score: result.score,
+        status: result.status,
+        findings: {
+          create: result.findings.map((f) => ({
+            code: f.code,
+            severity: f.severity,
+            message: f.message,
+            result: f.result,
+            detail: f.detail,
+          })),
+        },
+      },
+      include: { _count: { select: { findings: true } } },
+    });
+
+    await this.prisma.company.update({
+      where: { id: companyId },
+      data: { healthScore: result.score },
+    });
+
+    return toSummaryDto(run);
   }
 }
