@@ -134,27 +134,35 @@ export class CalendarService {
     const recurrenceGroupId =
       input.recurrence === 'none' ? null : createRecurrenceGroupId();
 
-    await this.prisma.obligation.createMany({
-      data: dates.map((dueDate) => ({
-        tenantId,
-        title: input.title,
-        type: input.type,
-        customType: input.customType ?? null,
-        dueDate,
-        companyId: input.companyId ?? null,
-        collaboratorId: input.collaboratorId,
-        recurrence: input.recurrence,
-        recurrenceGroupId,
-      })),
-    });
-
-    const created = await this.prisma.obligation.findMany({
-      where: recurrenceGroupId
-        ? { tenantId, recurrenceGroupId }
-        : { tenantId, title: input.title, dueDate: dates[0] },
-      orderBy: { dueDate: 'asc' },
-      include: WITH_RELATIONS,
-    });
+    /**
+     * Um `create` por ocorrência, dentro de uma transação.
+     *
+     * A versão anterior usava `createMany` — que não devolve as linhas — e
+     * depois rebuscava por `title + dueDate`. Duas tarefas com o mesmo título
+     * no mesmo dia (ex.: "Conferência mensal" de duas empresas no dia 10) e a
+     * consulta trazia as duas: o usuário cadastrava uma tarefa e a tela
+     * anunciava "2 tarefas criadas", devolvendo linhas que não eram dele.
+     *
+     * O teto de 24 ocorrências mantém a transação pequena.
+     */
+    const created = await this.prisma.$transaction(
+      dates.map((dueDate) =>
+        this.prisma.obligation.create({
+          data: {
+            tenantId,
+            title: input.title,
+            type: input.type,
+            customType: input.customType ?? null,
+            dueDate,
+            companyId: input.companyId ?? null,
+            collaboratorId: input.collaboratorId,
+            recurrence: input.recurrence,
+            recurrenceGroupId,
+          },
+          include: WITH_RELATIONS,
+        }),
+      ),
+    );
 
     await this.activity.record({
       tenantId,

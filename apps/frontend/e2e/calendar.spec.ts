@@ -68,9 +68,15 @@ test.describe('Calendário — tarefas recorrentes', () => {
       await expect(faixa).toContainText('10/03');
     } finally {
       // Concluída sai da faixa; roda mesmo se a asserção acima falhar.
-      await request.patch(`${API}/calendar/obligations/${id}`, {
+      // A limpeza é verificada: falha silenciosa aqui deixaria a tarefa
+      // pendurada na faixa e o próximo teste herdaria o lixo.
+      const limpeza = await request.patch(`${API}/calendar/obligations/${id}`, {
         data: { status: 'completed' },
       });
+      expect(
+        limpeza.ok(),
+        `limpeza da tarefa ${id} falhou: HTTP ${limpeza.status()} ${await limpeza.text()}`,
+      ).toBe(true);
     }
   });
 

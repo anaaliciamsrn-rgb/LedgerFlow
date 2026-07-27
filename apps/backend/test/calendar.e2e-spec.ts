@@ -272,6 +272,41 @@ describe('Calendar (e2e)', () => {
       });
     });
 
+    it('devolve só a tarefa criada quando já existe outra com mesmo título e data', async () => {
+      // Duas empresas com "Conferência mensal" no dia 10 é rotina de
+      // escritório. A versão anterior rebuscava por título + data e devolvia
+      // as duas, fazendo a tela anunciar "2 tarefas criadas".
+      const primeira = await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'Conferência mensal',
+          type: 'CONFERENCIA',
+          dueDate: '2026-03-10',
+          collaboratorId: ana.id,
+        })
+        .expect(201);
+
+      const segunda = await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'Conferência mensal',
+          type: 'CONFERENCIA',
+          dueDate: '2026-03-10',
+          collaboratorId: bruno.id,
+        })
+        .expect(201);
+
+      expect(segunda.body.data).toHaveLength(1);
+      expect(segunda.body.data[0].id).not.toBe(primeira.body.data[0].id);
+      expect(segunda.body.data[0].collaborator.id).toBe(bruno.id);
+
+      // As duas continuam existindo — o problema era o retorno, não a escrita.
+      const total = await ctx.prisma.obligation.count({
+        where: { tenantId: TENANT_A, title: 'Conferência mensal' },
+      });
+      expect(total).toBe(2);
+    });
+
     it('materializa 3 ocorrências mensais no mesmo grupo', async () => {
       const response = await http()
         .post('/api/calendar/obligations')
