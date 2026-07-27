@@ -135,4 +135,67 @@ describe('BrasilApiService', () => {
     expect(info?.dataAbertura).toBeNull();
     expect(info?.socios).toEqual([]);
   });
+
+  describe('lookupMany', () => {
+    it('indexa o resultado pelo CNPJ normalizado, aceitando máscara', async () => {
+      const fetcher = jest.fn().mockResolvedValue(jsonResponse(200, RAW_OK));
+      const service = makeService(fetcher as unknown as Fetcher);
+
+      const result = await service.lookupMany([
+        '11.222.333/0001-81',
+        '33000167000101',
+      ]);
+
+      expect(result.size).toBe(2);
+      expect(result.get('11222333000181')?.razaoSocial).toBe(
+        'Empresa Exemplo LTDA',
+      );
+      expect(result.has('33000167000101')).toBe(true);
+    });
+
+    it('deduplica CNPJs repetidos antes de sair para a rede', async () => {
+      const fetcher = jest.fn().mockResolvedValue(jsonResponse(200, RAW_OK));
+      const service = makeService(fetcher as unknown as Fetcher);
+
+      const result = await service.lookupMany([
+        '11222333000181',
+        '11.222.333/0001-81',
+        '11222333000181',
+      ]);
+
+      expect(result.size).toBe(1);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it('devolve null para o CNPJ que falhou, sem lançar', async () => {
+      const fetcher = jest.fn().mockRejectedValue(new Error('network'));
+      const service = makeService(fetcher as unknown as Fetcher);
+
+      const result = await service.lookupMany(['11222333000181']);
+
+      expect(result.get('11222333000181')).toBeNull();
+    });
+
+    it('nunca ultrapassa 5 requisições simultâneas', async () => {
+      let running = 0;
+      let peak = 0;
+      const fetcher = jest.fn().mockImplementation(async () => {
+        running++;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        running--;
+        return jsonResponse(200, RAW_OK);
+      });
+      const service = makeService(fetcher as unknown as Fetcher);
+
+      // 20 CNPJs distintos (o cache tornaria repetidos irrelevantes).
+      const cnpjs = Array.from({ length: 20 }, (_, i) =>
+        String(10000000000000 + i),
+      );
+      await service.lookupMany(cnpjs);
+
+      expect(peak).toBeLessThanOrEqual(5);
+      expect(peak).toBeGreaterThan(1);
+    });
+  });
 });

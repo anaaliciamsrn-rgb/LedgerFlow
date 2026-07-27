@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HTTP_FETCHER, type Fetcher } from './http-fetcher';
+import { mapWithConcurrency } from '../common/concurrency';
 import {
   normalizeCnpj,
   toCnpjInfo,
@@ -21,6 +22,13 @@ interface FetchResult {
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const TIMEOUT_MS = 5000;
 const MAX_ATTEMPTS = 2;
+
+/**
+ * Teto de requisições simultâneas à BrasilAPI (spec §2.1). Sem isso, auditar
+ * uma carteira de 50 empresas dispararia 50 chamadas de uma vez e a API
+ * aplicaria rate limit no meio da apresentação.
+ */
+const LOOKUP_CONCURRENCY = 5;
 
 /**
  * Consulta CNPJ na BrasilAPI com resiliência:
@@ -54,6 +62,26 @@ export class BrasilApiService {
       });
     }
     return result.value;
+  }
+
+  /**
+   * Consulta vários CNPJs com concorrência limitada.
+   *
+   * Deduplica antes de sair para a rede e reusa o cache de `lookupCnpj`, então
+   * CNPJs repetidos na carteira custam uma única chamada. Nunca lança: o CNPJ
+   * cuja consulta falhou vira `null` no mapa, e quem chama decide o que fazer
+   * (na auditoria, vira uma regra `skipped` em vez de derrubar tudo).
+   */
+  async lookupMany(
+    cnpjs: readonly string[],
+  ): Promise<Map<string, CnpjInfo | null>> {
+    const keys = [...new Set(cnpjs.map(normalizeCnpj))];
+
+    const values = await mapWithConcurrency(keys, LOOKUP_CONCURRENCY, (key) =>
+      this.lookupCnpj(key),
+    );
+
+    return new Map(keys.map((key, index) => [key, values[index]]));
   }
 
   private async fetchWithRetry(cnpj: string): Promise<FetchResult> {
