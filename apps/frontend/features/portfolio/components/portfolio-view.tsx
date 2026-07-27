@@ -21,6 +21,13 @@ export function PortfolioView(): React.ReactNode {
     state: state || undefined,
   });
 
+  // As opções do filtro vêm de uma consulta SEM filtro. Se viessem de `data`,
+  // a lista encolheria para o próprio estado selecionado e o usuário ficaria
+  // preso — só conseguiria trocar de UF voltando antes para "Todos".
+  // O React Query desduplica e cacheia, então não custa uma requisição por render.
+  const { data: unfiltered } = usePortfolio({});
+  const stateOptions = unfiltered?.byState ?? [];
+
   if (isError) {
     return <EmptyState icon={BarChart3} title="Erro ao carregar a carteira" description="Tente novamente em instantes." />;
   }
@@ -40,7 +47,7 @@ export function PortfolioView(): React.ReactNode {
           className="h-10 rounded-md border border-input bg-background px-3 text-sm"
         >
           <option value="">Todos os estados</option>
-          {(data?.byState ?? []).map((bucket) => (
+          {stateOptions.map((bucket) => (
             <option key={bucket.label} value={bucket.label}>{bucket.label}</option>
           ))}
         </select>
