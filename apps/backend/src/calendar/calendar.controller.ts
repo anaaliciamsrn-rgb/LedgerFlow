@@ -24,6 +24,7 @@ import {
   type HolidaysQuery,
   type ListObligationsQuery,
   type ObligationDto,
+  type OverdueDto,
   type UpdateObligationInput,
 } from './calendar.schema';
 
@@ -37,6 +38,12 @@ export class CalendarController {
     @Query(new ZodValidationPipe(holidaysQuerySchema)) query: HolidaysQuery,
   ): Promise<HolidayDto[]> {
     return this.calendar.listHolidays(query.year);
+  }
+
+  /** Rota literal antes de qualquer rota com parâmetro, para não colidir. */
+  @Get('obligations/overdue')
+  listOverdue(@TenantId() tenantId: string): Promise<OverdueDto> {
+    return this.calendar.listOverdue(tenantId);
   }
 
   @Get('obligations')

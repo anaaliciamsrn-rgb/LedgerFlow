@@ -378,7 +378,7 @@ describe('Companies (e2e)', () => {
 
   describe('BrasilAPI integration', () => {
     const RAW_ATIVA = {
-      cnpj: '14141414000114',
+      cnpj: '00000000000191',
       razao_social: 'Comércio Ativo LTDA',
       nome_fantasia: 'Ativo',
       municipio: 'Curitiba',
@@ -390,7 +390,7 @@ describe('Companies (e2e)', () => {
       brasilApiMock.respondWith = { status: 200, body: RAW_ATIVA };
 
       const response = await http()
-        .get('/api/companies/lookup/14141414000114')
+        .get('/api/companies/lookup/00000000000191')
         .expect(200);
 
       expect(response.body.data).toMatchObject({
@@ -402,12 +402,23 @@ describe('Companies (e2e)', () => {
     });
 
     it('GET /companies/lookup/:cnpj returns null data when not found', async () => {
-      // brasilApiMock default -> 404
+      // CNPJ válido (dígitos verificadores corretos) porém inexistente na
+      // Receita — o mock responde 404 por padrão.
       const response = await http()
-        .get('/api/companies/lookup/00000000000000')
+        .get('/api/companies/lookup/47960950000121')
         .expect(200);
 
       expect(response.body.data).toBeNull();
+    });
+
+    it('rejeita CNPJ inválido com 400 sem chamar a BrasilAPI', async () => {
+      // O endpoint seria um proxy aberto para a BrasilAPI se aceitasse
+      // qualquer string: dá para varrer CNPJs e queimar o nosso rate limit.
+      brasilApiMock.respondWith = { status: 200, body: RAW_ATIVA };
+
+      await http().get('/api/companies/lookup/00000000000000').expect(400);
+      await http().get('/api/companies/lookup/12345678000190').expect(400);
+      await http().get('/api/companies/lookup/abc').expect(400);
     });
 
     it('enriches status/healthScore from BrasilAPI when status is left as default', async () => {
@@ -418,7 +429,7 @@ describe('Companies (e2e)', () => {
         .send({
           name: 'Comércio Ativo LTDA',
           tradeName: 'Ativo',
-          cnpj: '14141414000114',
+          cnpj: '00000000000191',
           email: 'ativo@empresa.com.br',
           phone: '4133334444',
           city: 'Curitiba',

@@ -155,8 +155,8 @@ describe('Calendar (e2e)', () => {
     });
   });
 
-  describe('overdueOnly', () => {
-    it('devolve as pendentes vencidas ignorando from/to', async () => {
+  describe('GET /api/calendar/obligations/overdue', () => {
+    it('devolve as pendentes vencidas de qualquer mês, com o total real', async () => {
       await ctx.prisma.obligation.createMany({
         data: [
           tarefa({
@@ -180,14 +180,71 @@ describe('Calendar (e2e)', () => {
       });
 
       const response = await http()
-        .get('/api/calendar/obligations')
-        .query({ overdueOnly: 'true', from: '2026-01-01', to: '2026-01-31' })
+        .get('/api/calendar/obligations/overdue')
         .expect(200);
 
-      expect(response.body.data.map((o: { title: string }) => o.title)).toEqual([
-        'Vencida antiga',
-        'Vencida recente',
-      ]);
+      expect(response.body.data.total).toBe(2);
+      expect(
+        response.body.data.items.map((o: { title: string }) => o.title),
+      ).toEqual(['Vencida antiga', 'Vencida recente']);
+    });
+
+    it('nunca devolve atrasadas de outro escritório', async () => {
+      await ctx.prisma.obligation.create({
+        data: tarefa({
+          tenantId: TENANT_B,
+          collaboratorId: externo.id,
+          title: 'Atraso alheio',
+          dueDate: new Date('2020-03-10T00:00:00Z'),
+        }),
+      });
+
+      const response = await http()
+        .get('/api/calendar/obligations/overdue')
+        .expect(200);
+
+      expect(response.body.data.total).toBe(0);
+      expect(response.body.data.items).toEqual([]);
+    });
+  });
+
+  describe('PATCH — tipo da tarefa', () => {
+    it('permite corrigir o tipo depois de criada', async () => {
+      const criada = await ctx.prisma.obligation.create({
+        data: tarefa({ type: 'FOLHA' }),
+      });
+
+      const response = await http()
+        .patch(`/api/calendar/obligations/${criada.id}`)
+        .send({ type: 'GUIAS' })
+        .expect(200);
+
+      expect(response.body.data.type).toBe('GUIAS');
+    });
+
+    it('limpa a descrição livre ao sair do tipo OUTRO', async () => {
+      const criada = await ctx.prisma.obligation.create({
+        data: tarefa({ type: 'OUTRO', customType: 'Baixa de protocolo' }),
+      });
+
+      const response = await http()
+        .patch(`/api/calendar/obligations/${criada.id}`)
+        .send({ type: 'CONFERENCIA' })
+        .expect(200);
+
+      expect(response.body.data.type).toBe('CONFERENCIA');
+      expect(response.body.data.customType).toBeNull();
+    });
+
+    it('exige descrição ao mudar para OUTRO', async () => {
+      const criada = await ctx.prisma.obligation.create({
+        data: tarefa({ type: 'FOLHA' }),
+      });
+
+      await http()
+        .patch(`/api/calendar/obligations/${criada.id}`)
+        .send({ type: 'OUTRO' })
+        .expect(422);
     });
   });
 

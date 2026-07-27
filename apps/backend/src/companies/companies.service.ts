@@ -1,10 +1,12 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { isValidCnpj } from '../common/cnpj';
 import { ActivityService } from '../activity/activity.service';
 import { BrasilApiService } from '../brasil-api/brasil-api.service';
 import type { CnpjInfo, PartnerInfo } from '../brasil-api/brasil-api.types';
@@ -61,8 +63,18 @@ export class CompaniesService {
     private readonly brasilApi: BrasilApiService,
   ) {}
 
-  /** Consulta pública de CNPJ (para o frontend pré-preencher o formulário). */
+  /**
+   * Consulta de CNPJ para o frontend pré-preencher o formulário.
+   *
+   * Valida os dígitos verificadores **antes** de sair para a rede: sem isso o
+   * endpoint vira um proxy aberto para a BrasilAPI, e qualquer um poderia
+   * varrer CNPJs através da nossa API — queimando o nosso rate limit no
+   * fornecedor. CNPJ malformado nem chega a gerar requisição.
+   */
   lookupCnpj(cnpj: string): Promise<CnpjInfo | null> {
+    if (!isValidCnpj(cnpj)) {
+      throw new BadRequestException('CNPJ inválido');
+    }
     return this.brasilApi.lookupCnpj(cnpj);
   }
 

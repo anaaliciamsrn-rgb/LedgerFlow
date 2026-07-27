@@ -23,10 +23,11 @@ const DATE_FORMATTER = new Intl.DateTimeFormat('pt-BR', {
  */
 export function OverdueBanner({ onSelect }: OverdueBannerProps): React.ReactNode {
   const { data } = useOverdueObligations();
-  const atrasadas = data ?? [];
+  const total = data?.total ?? 0;
+  const atrasadas = data?.items ?? [];
 
   // Sem atraso, a faixa não ocupa espaço nenhum na tela.
-  if (atrasadas.length === 0) {
+  if (total === 0) {
     return null;
   }
 
@@ -37,9 +38,7 @@ export function OverdueBanner({ onSelect }: OverdueBannerProps): React.ReactNode
     >
       <h2 className="flex items-center gap-2 text-sm font-semibold text-destructive">
         <AlertTriangle className="size-4" aria-hidden />
-        {atrasadas.length === 1
-          ? '1 tarefa em atraso'
-          : `${atrasadas.length} tarefas em atraso`}
+        {total === 1 ? '1 tarefa em atraso' : `${total} tarefas em atraso`}
       </h2>
 
       <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
@@ -74,6 +73,12 @@ export function OverdueBanner({ onSelect }: OverdueBannerProps): React.ReactNode
           </li>
         ))}
       </ul>
+
+      {total > atrasadas.length ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Mostrando as {atrasadas.length} mais antigas de {total}.
+        </p>
+      ) : null}
     </section>
   );
 }

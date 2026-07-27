@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/toast';
 import { cn } from '@/lib/cn';
 import { Card } from '@/components/ui/card';
 import { colorClasses } from '@/features/calendar/lib/collaborator-colors';

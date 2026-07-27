@@ -42,9 +42,16 @@ interface ErrorBody {
   details?: Record<string, readonly string[]>;
 }
 
+const GENERIC_SERVER_MESSAGE = 'Erro interno do servidor';
+
 /**
  * Serializa qualquer erro no envelope esperado pelo frontend:
  * { code, message, status, details? }.
+ *
+ * Erros que não são `HttpException` (falha do Prisma, bug de código) nunca têm
+ * a mensagem original devolvida ao cliente: ela carrega nome de tabela, de
+ * coluna e de constraint. O detalhe vai para o log; o cliente recebe um texto
+ * genérico.
  */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -54,7 +61,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const res = host.switchToHttp().getResponse<Response>();
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    let message = 'Erro interno do servidor';
+    let message = GENERIC_SERVER_MESSAGE;
     let details: Record<string, readonly string[]> | undefined;
 
     if (exception instanceof HttpException) {
@@ -73,12 +80,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
           details = obj.details as Record<string, readonly string[]>;
         }
       }
-    } else if (exception instanceof Error) {
-      message = exception.message;
     }
 
     if (status >= 500) {
+      // O erro completo (mensagem + stack) só existe no log do servidor.
       this.logger.error(exception);
+      message = GENERIC_SERVER_MESSAGE;
     }
 
     const body: ErrorBody = {

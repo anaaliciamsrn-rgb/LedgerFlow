@@ -13,6 +13,7 @@ import {
   type ListObligationsQuery,
   type ObligationDto,
   type ObligationWithRelations,
+  type OverdueDto,
   type UpdateObligationInput,
 } from './calendar.schema';
 
@@ -41,21 +42,47 @@ export class CalendarService {
   ): Promise<ObligationDto[]> {
     const now = new Date();
 
-    // `overdueOnly` é um modo próprio: ignora o intervalo do mês exibido,
-    // porque a faixa do topo mostra atraso de qualquer mês.
-    const where: Prisma.ObligationWhereInput = query.overdueOnly
-      ? { tenantId, status: 'pending', dueDate: { lt: now } }
-      : this.buildRangeWhere(tenantId, query);
-
     const rows = await this.prisma.obligation.findMany({
-      where,
+      where: this.buildRangeWhere(tenantId, query),
       orderBy: { dueDate: 'asc' },
       include: WITH_RELATIONS,
-      ...(query.overdueOnly ? { take: OVERDUE_LIMIT } : {}),
     });
 
     const holidays = await this.holidaysForYearsOf(rows);
     return rows.map((row) => toObligationDto(row, now, holidays));
+  }
+
+  /**
+   * Tarefas vencidas e ainda pendentes, de **qualquer** mês — a faixa do topo
+   * não depende do mês exibido na grade.
+   *
+   * `total` vem de um `count` sem teto, enquanto `items` é limitado a
+   * {@link OVERDUE_LIMIT}. Contar `items` faria a faixa anunciar "100 tarefas
+   * em atraso" havendo 300.
+   */
+  async listOverdue(tenantId: string): Promise<OverdueDto> {
+    const now = new Date();
+    const where: Prisma.ObligationWhereInput = {
+      tenantId,
+      status: 'pending',
+      dueDate: { lt: now },
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.obligation.count({ where }),
+      this.prisma.obligation.findMany({
+        where,
+        orderBy: { dueDate: 'asc' },
+        include: WITH_RELATIONS,
+        take: OVERDUE_LIMIT,
+      }),
+    ]);
+
+    const holidays = await this.holidaysForYearsOf(rows);
+    return {
+      total,
+      items: rows.map((row) => toObligationDto(row, now, holidays)),
+    };
   }
 
   private buildRangeWhere(
@@ -156,9 +183,18 @@ export class CalendarService {
     if (action === 'anticipate') {
       data.dueDate = await this.anticipate(current.dueDate);
     }
+    // Sair de OUTRO apaga a descrição livre: mantê-la deixaria a tarefa com
+    // dois rótulos concorrentes, e a listagem escolheria o errado.
+    if (fields.type && fields.type !== 'OUTRO') {
+      data.customType = null;
+    }
 
+    // O `tenantId` volta no WHERE da escrita. `ensureOwned` já conferiu, mas
+    // entre a leitura e a escrita há uma janela; repetir o filtro fecha ela
+    // sem custo — `updateMany` não aceita `include`, daí o `update` com
+    // condição composta.
     const obligation = await this.prisma.obligation.update({
-      where: { id },
+      where: { id, tenantId },
       data,
       include: WITH_RELATIONS,
     });
