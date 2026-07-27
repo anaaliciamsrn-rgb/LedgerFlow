@@ -1,5 +1,5 @@
-import { PortfolioView } from '@/features/portfolio/components/portfolio-view';
+import { DashboardView } from '@/features/dashboard/components/dashboard-view';
 
 export default function DashboardPage(): React.ReactNode {
-  return <PortfolioView />;
+  return <DashboardView />;
 }

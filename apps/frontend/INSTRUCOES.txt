@@ -1,31 +1,30 @@
-BLOCO — FUNDAÇÃO DE ACESSIBILIDADE
-====================================
+TELA DE CONFIGURAÇÕES (Aparência + Acessibilidade REAL + Notificações)
+========================================================================
+Extraia na raiz de apps/frontend:
+  unzip -o ~/Downloads/ledgerflow-settings.zip -d .
 
-Este pacote adiciona a base de acessibilidade (provider + cookie + CSS).
-Extraia na raiz de apps/frontend com:  unzip -o ~/Downloads/ledgerflow-a11y-base.zip -d .
+ARQUIVOS (8):
+- features/settings/components/setting-row.tsx          (NOVO)
+- features/settings/components/toggle-switch.tsx        (NOVO)
+- features/settings/components/segmented-control.tsx    (NOVO)
+- features/settings/components/appearance-section.tsx   (NOVO)
+- features/settings/components/accessibility-section.tsx(NOVO)
+- features/settings/components/notifications-section.tsx(NOVO)
+- features/settings/components/settings-view.tsx        (NOVO)
+- app/(dashboard)/settings/page.tsx                     (SUBSTITUI placeholder)
 
-ARQUIVOS NOVOS (7):
-- features/settings/types/a11y.types.ts
-- features/settings/lib/a11y-cookie.ts
-- features/settings/hooks/use-a11y.ts
-- contexts/a11y.context.ts
-- providers/a11y-provider.tsx
-- styles/a11y.css
-ARQUIVOS SUBSTITUÍDOS (2):
-- providers/app-providers.tsx   (adiciona o A11yProvider)
-- app/layout.tsx                (lê o cookie no servidor)
+O QUE FUNCIONA DE VERDADE:
+- APARÊNCIA: alterna tema Claro/Escuro/Sistema (via next-themes já existente).
+- ACESSIBILIDADE: liga na fundação que já existe (useA11y). Alto contraste,
+  reduzir movimento, tamanho de fonte (A−/A/A+) e densidade — TUDO funciona
+  ao vivo e persiste no cookie ao recarregar.
+- NOTIFICAÇÕES: switches visuais (preferências locais).
 
->>> UMA EDIÇÃO MANUAL NECESSÁRIA <<<
-Abra app/globals.css e adicione ESTA LINHA no topo do arquivo,
-ANTES da linha "@tailwind base;":
-
-    @import '../styles/a11y.css';
-
-Sem isso, as classes de acessibilidade não terão efeito visual.
+Navegação lateral estilo Linear/Stripe. Tudo acessível (role, aria, foco).
 
 DEPOIS:
-    npm run type-check
+  npm run type-check   (0 erros)
+  npm run dev          (/settings)
 
-Se der 0 erros, a fundação está pronta. A tela de Configurações
-(onde o usuário liga/desliga as opções) vem no próximo bloco —
-por enquanto a base já funciona e respeita prefers-reduced-motion.
+TESTE: vá em Acessibilidade, clique A+ -> a interface aumenta na hora.
+Ligue Alto contraste -> bordas e texto reforçam. Recarregue -> mantém.
