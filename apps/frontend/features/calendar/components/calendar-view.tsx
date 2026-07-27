@@ -48,9 +48,15 @@ export function CalendarView(): React.ReactNode {
 
   const { data, isLoading, isError } = useObligations(from, to, assignee || undefined);
 
+  // As opções do filtro vêm de uma consulta SEM filtro de responsável. Se
+  // viessem de `data`, ao escolher alguém a lista encolheria para essa única
+  // pessoa e o usuário ficaria preso — só trocaria voltando a "Todos".
+  // O React Query desduplica e cacheia, então não custa requisição por render.
+  const { data: unfiltered } = useObligations(from, to, undefined);
+
   const responsaveis = useMemo(
-    () => [...new Set((data ?? []).map((item) => item.assignee))].filter(Boolean),
-    [data],
+    () => [...new Set((unfiltered ?? []).map((item) => item.assignee))].filter(Boolean).sort(),
+    [unfiltered],
   );
 
   const atrasadas = (data ?? []).filter((item) => item.overdue).length;
