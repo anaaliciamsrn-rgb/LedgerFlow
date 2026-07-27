@@ -1,12 +1,5 @@
-import { Sparkles } from 'lucide-react';
-import { PagePlaceholder } from '@/components/ui/page-placeholder';
+import { AiAssistantView } from '@/features/ai/components/ai-assistant-view';
 
 export default function AiPage(): React.ReactNode {
-  return (
-    <PagePlaceholder
-      title="Assistente IA"
-      description="Peça análises, relatórios e insights sobre sua carteira."
-      icon={Sparkles}
-    />
-  );
+  return <AiAssistantView />;
 }
