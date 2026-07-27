@@ -130,18 +130,30 @@ async function main(): Promise<void> {
   });
 
   for (const company of COMPANIES) {
+    // `update` precisa reaplicar os campos: com `update: {}` um registro
+    // criado por uma versão anterior do seed nunca ganharia as colunas novas,
+    // e a demo mostraria empresas com CNAE/porte/situação em branco.
     await prisma.company.upsert({
       where: {
         tenantId_cnpj: { tenantId: TENANT_ID, cnpj: company.cnpj },
       },
-      update: {},
+      update: { ...company },
       create: { ...company, tenantId: TENANT_ID },
     });
   }
 
-  const count = await prisma.company.count({
-    where: { tenantId: TENANT_ID },
+  // Remove empresas de execuções anteriores que saíram da lista do seed.
+  // Sem isso, o tenant de demonstração acumula registros órfãos sem os
+  // campos do brief. Escopo restrito ao tenant de dev.
+  const removidas = await prisma.company.deleteMany({
+    where: {
+      tenantId: TENANT_ID,
+      cnpj: { notIn: COMPANIES.map((company) => company.cnpj) },
+    },
   });
+  if (removidas.count > 0) {
+    console.log(`Removidas ${removidas.count} empresa(s) fora do seed atual.`);
+  }
 
   const companies = await prisma.company.findMany({
     where: { tenantId: TENANT_ID },
@@ -202,7 +214,16 @@ async function main(): Promise<void> {
     ],
   });
 
-  console.log(`Seed concluído: tenant ${TENANT_ID} com ${count} empresas.`);
+  // Contagem no fim, depois de criar e remover — antes reportava o estado
+  // anterior à limpeza e mentia sobre o resultado.
+  const count = await prisma.company.count({ where: { tenantId: TENANT_ID } });
+  const obrigacoes = await prisma.obligation.count({
+    where: { tenantId: TENANT_ID },
+  });
+
+  console.log(
+    `Seed concluído: tenant ${TENANT_ID} com ${count} empresas e ${obrigacoes} obrigações.`,
+  );
 }
 
 main()
