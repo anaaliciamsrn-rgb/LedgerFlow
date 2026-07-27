@@ -75,4 +75,64 @@ describe('BrasilApiService', () => {
     expect(info?.situacao).toBe('ATIVA');
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
+
+  it('extrai CNAE, porte, endereço completo e quadro societário', async () => {
+    const raw = {
+      cnpj: '33000167000101',
+      razao_social: 'PETROLEO BRASILEIRO S A PETROBRAS',
+      nome_fantasia: 'PETROBRAS',
+      descricao_situacao_cadastral: 'ATIVA',
+      cnae_fiscal: 1921700,
+      cnae_fiscal_descricao: 'Fabricação de produtos do refino de petróleo',
+      porte: 'DEMAIS',
+      natureza_juridica: 'Sociedade Anônima Aberta',
+      data_inicio_atividade: '1953-10-03',
+      logradouro: 'REPUBLICA DO CHILE',
+      numero: '65',
+      complemento: 'ANDAR 1 A 23',
+      bairro: 'CENTRO',
+      cep: '20031912',
+      municipio: 'RIO DE JANEIRO',
+      uf: 'RJ',
+      qsa: [
+        {
+          nome_socio: 'FULANO DE TAL',
+          qualificacao_socio: 'Diretor',
+          faixa_etaria: '51 a 60 anos',
+        },
+      ],
+    };
+    const fetcher = jest.fn().mockResolvedValue(jsonResponse(200, raw));
+    const service = makeService(fetcher as unknown as Fetcher);
+
+    const info = await service.lookupCnpj('33000167000101');
+
+    expect(info).toMatchObject({
+      cnaeCodigo: '1921700',
+      cnaeDescricao: 'Fabricação de produtos do refino de petróleo',
+      porte: 'DEMAIS',
+      naturezaJuridica: 'Sociedade Anônima Aberta',
+      logradouro: 'REPUBLICA DO CHILE',
+      numero: '65',
+      bairro: 'CENTRO',
+      cep: '20031912',
+    });
+    expect(info?.dataAbertura).toBe('1953-10-03');
+    expect(info?.socios).toEqual([
+      { nome: 'FULANO DE TAL', qualificacao: 'Diretor', faixaEtaria: '51 a 60 anos' },
+    ]);
+  });
+
+  it('devolve defaults vazios quando a BrasilAPI omite campos opcionais', async () => {
+    const raw = { cnpj: '33000167000101', razao_social: 'EMPRESA X' };
+    const fetcher = jest.fn().mockResolvedValue(jsonResponse(200, raw));
+    const service = makeService(fetcher as unknown as Fetcher);
+
+    const info = await service.lookupCnpj('33000167000101');
+
+    expect(info).toMatchObject({ cnaeCodigo: '', porte: '', cep: '' });
+    expect(info?.naturezaJuridica).toBeNull();
+    expect(info?.dataAbertura).toBeNull();
+    expect(info?.socios).toEqual([]);
+  });
 });
