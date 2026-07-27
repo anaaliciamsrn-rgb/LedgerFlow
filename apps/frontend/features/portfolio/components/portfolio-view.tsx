@@ -1,15 +1,41 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { BarChart3 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { SearchBar } from '@/components/ui/search-bar';
 import { StatCard } from '@/components/ui/stat-card';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Loading } from '@/components/ui/loading';
-import { BucketChart } from '@/features/portfolio/components/bucket-chart';
+import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { usePortfolio } from '@/features/portfolio/hooks/use-portfolio';
 import { useDebounce } from '@/hooks/use-debounce';
+
+/**
+ * O Recharts responde pela maior parte do peso desta rota. Carregá-lo sob
+ * demanda tira a biblioteca do bundle inicial: os cards de resumo e os
+ * filtros aparecem de imediato e os gráficos entram logo depois.
+ *
+ * `ssr: false` porque o Recharts mede o contêiner para dimensionar o SVG —
+ * renderizar no servidor produziria um gráfico de tamanho zero.
+ */
+const BucketChart = dynamic(
+  () =>
+    import('@/features/portfolio/components/bucket-chart').then(
+      (mod) => mod.BucketChart,
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <Card className="p-4">
+        <Skeleton className="mb-4 h-4 w-40" />
+        <Skeleton className="h-64 w-full" />
+      </Card>
+    ),
+  },
+);
 
 export function PortfolioView(): React.ReactNode {
   const [search, setSearch] = useState('');
