@@ -5,14 +5,27 @@ test.describe('Login', () => {
     await page.goto('/login');
 
     await expect(
-      page.getByRole('heading', { name: 'LedgerFlow' }),
+      page.getByRole('heading', { name: 'Plataforma Contábil' }),
     ).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: 'Bem-vinda de volta' }),
+      page.getByRole('heading', { name: 'Bem-vindo de volta' }),
     ).toBeVisible();
     await expect(page.locator('#email')).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
+  });
+
+  // O cliente exigiu sistema white label: nenhuma identidade visual da
+  // empresa desenvolvedora. A versão anterior deste arquivo afirmava o
+  // contrário — exigia o texto "LedgerFlow" na tela —, ou seja, protegia
+  // justamente a violação do requisito.
+  test('não expõe a marca da desenvolvedora (white label)', async ({ page }) => {
+    await page.goto('/login');
+
+    await expect(page.locator('body')).not.toContainText('LedgerFlow', {
+      ignoreCase: true,
+    });
+    await expect(page).not.toHaveTitle(/ledgerflow/i);
   });
 
   test('associates labels with their inputs (accessibility)', async ({
@@ -58,7 +71,7 @@ test.describe('Login', () => {
     await page.goto('/login');
 
     await expect(
-      page.getByRole('heading', { name: 'Bem-vinda de volta' }),
+      page.getByRole('heading', { name: 'Bem-vindo de volta' }),
     ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Entrar' })).toBeVisible();
     const noHorizontalScroll = await page.evaluate(
