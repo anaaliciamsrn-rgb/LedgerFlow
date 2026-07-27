@@ -3,7 +3,7 @@ import {
   PipeTransform,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import type { ZodError, ZodSchema } from 'zod';
+import type { ZodError, ZodType, ZodTypeDef } from 'zod';
 
 function flatten(error: ZodError): Record<string, string[]> {
   const out: Record<string, string[]> = {};
@@ -18,10 +18,15 @@ function flatten(error: ZodError): Record<string, string[]> {
  * Valida o payload contra um schema Zod (espelhando os schemas do frontend)
  * e devolve os erros no formato details: Record<string, string[]>.
  * Uso: @Body(new ZodValidationPipe(createCompanySchema)).
+ *
+ * O tipo de **entrada** do schema é `unknown`, não `T`: o que chega do HTTP é
+ * sempre string ou JSON cru. Amarrar entrada e saída ao mesmo tipo (o que
+ * `ZodSchema<T>` faz) recusaria qualquer schema com `.transform()` — por
+ * exemplo, uma query string `'true'` que vira `boolean`.
  */
 @Injectable()
 export class ZodValidationPipe<T> implements PipeTransform {
-  constructor(private readonly schema: ZodSchema<T>) {}
+  constructor(private readonly schema: ZodType<T, ZodTypeDef, unknown>) {}
 
   transform(value: unknown): T {
     const result = this.schema.safeParse(value);

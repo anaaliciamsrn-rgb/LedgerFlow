@@ -4,10 +4,12 @@ import { ActivityModule } from '../activity/activity.module';
 import { BrasilApiModule } from '../brasil-api/brasil-api.module';
 import { CalendarController } from './calendar.controller';
 import { CalendarService } from './calendar.service';
+import { CollaboratorsController } from './collaborators.controller';
+import { CollaboratorsService } from './collaborators.service';
 
 @Module({
   imports: [CommonModule, ActivityModule, BrasilApiModule],
-  controllers: [CalendarController],
-  providers: [CalendarService],
+  controllers: [CalendarController, CollaboratorsController],
+  providers: [CalendarService, CollaboratorsService],
 })
 export class CalendarModule {}

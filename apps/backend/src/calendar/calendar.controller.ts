@@ -16,9 +16,12 @@ import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import { CalendarService } from './calendar.service';
 import {
   createObligationSchema,
+  holidaysQuerySchema,
   listObligationsQuerySchema,
   updateObligationSchema,
   type CreateObligationInput,
+  type HolidayDto,
+  type HolidaysQuery,
   type ListObligationsQuery,
   type ObligationDto,
   type UpdateObligationInput,
@@ -28,6 +31,13 @@ import {
 @UseGuards(TenantContextGuard)
 export class CalendarController {
   constructor(private readonly calendar: CalendarService) {}
+
+  @Get('holidays')
+  listHolidays(
+    @Query(new ZodValidationPipe(holidaysQuerySchema)) query: HolidaysQuery,
+  ): Promise<HolidayDto[]> {
+    return this.calendar.listHolidays(query.year);
+  }
 
   @Get('obligations')
   list(
