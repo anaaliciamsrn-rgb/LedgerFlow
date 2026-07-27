@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/ui/coming-soon';
+import { PortfolioView } from '@/features/portfolio/components/portfolio-view';
 
 export default function DashboardPage(): React.ReactNode {
-  return <ComingSoon title="Dashboard" />;
+  return <PortfolioView />;
 }
