@@ -1,49 +1,127 @@
 import { z } from 'zod';
-import type { Obligation } from '@prisma/client';
+import type { Collaborator, Obligation } from '@prisma/client';
 
 export const obligationStatusSchema = z.enum(['pending', 'completed']);
 
-export const recurrenceSchema = z.enum(['none', 'monthly']);
+/** Catálogo do brief. `OUTRO` abre o campo livre `customType`. */
+export const obligationTypeSchema = z.enum([
+  'FOLHA',
+  'DOCUMENTOS',
+  'GUIAS',
+  'CONFERENCIA',
+  'OUTRO',
+]);
+export type ObligationType = z.infer<typeof obligationTypeSchema>;
+
+export const recurrenceSchema = z.enum([
+  'none',
+  'weekly',
+  'biweekly',
+  'monthly',
+  'quarterly',
+  'yearly',
+]);
 export type Recurrence = z.infer<typeof recurrenceSchema>;
 
-export const createObligationSchema = z.object({
-  title: z.string().min(1, 'Título é obrigatório'),
-  type: z.string().min(1, 'Tipo é obrigatório'),
-  dueDate: z.coerce.date({ invalid_type_error: 'Data de vencimento inválida' }),
-  companyId: z.string().optional(),
-  assignee: z.string().min(1, 'Responsável é obrigatório'),
-  recurrence: recurrenceSchema.default('none'),
-  occurrences: z.coerce.number().int().min(1).max(24).default(1),
-});
+/**
+ * `customType` só existe para `OUTRO`. Aceitar nos dois casos deixaria a
+ * listagem com dois rótulos concorrentes para a mesma tarefa.
+ */
+export const createObligationSchema = z
+  .object({
+    title: z.string().trim().min(1, 'Título é obrigatório').max(120),
+    type: obligationTypeSchema,
+    customType: z.string().trim().min(1).max(60).optional(),
+    dueDate: z.coerce.date({
+      invalid_type_error: 'Data de vencimento inválida',
+    }),
+    companyId: z.string().optional(),
+    collaboratorId: z.string().min(1, 'Responsável é obrigatório'),
+    recurrence: recurrenceSchema.default('none'),
+    occurrences: z.coerce.number().int().min(1).max(24).default(1),
+  })
+  .superRefine((value, ctx) => {
+    if (value.type === 'OUTRO' && !value.customType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['customType'],
+        message: 'Descreva a tarefa quando o tipo for "Outro"',
+      });
+    }
+    if (value.type !== 'OUTRO' && value.customType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['customType'],
+        message: 'A descrição livre só vale para o tipo "Outro"',
+      });
+    }
+  });
 export type CreateObligationInput = z.infer<typeof createObligationSchema>;
 
 export const updateObligationSchema = z
   .object({
-    title: z.string().min(1).optional(),
-    type: z.string().min(1).optional(),
+    title: z.string().trim().min(1).max(120).optional(),
     dueDate: z.coerce.date().optional(),
     status: obligationStatusSchema.optional(),
+    /** Move o vencimento para o dia útil anterior. Calculado no servidor. */
+    action: z.literal('anticipate').optional(),
   })
   .strict();
 export type UpdateObligationInput = z.infer<typeof updateObligationSchema>;
+
+/** `'true'` explícito — `z.coerce.boolean()` transformaria `'false'` em `true`. */
+const booleanFlag = z
+  .enum(['true', 'false'])
+  .transform((value) => value === 'true')
+  .optional();
 
 export const listObligationsQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   status: obligationStatusSchema.optional(),
-  assignee: z.string().optional(),
+  collaboratorId: z.string().optional(),
+  /** Ignora `from`/`to` e devolve todas as pendentes vencidas. */
+  overdueOnly: booleanFlag,
 });
 export type ListObligationsQuery = z.infer<typeof listObligationsQuerySchema>;
 
+export const holidaysQuerySchema = z.object({
+  year: z.coerce
+    .number({ invalid_type_error: 'Ano inválido' })
+    .int('Ano inválido')
+    .min(2000, 'Ano fora do intervalo suportado')
+    .max(2100, 'Ano fora do intervalo suportado'),
+});
+export type HolidaysQuery = z.infer<typeof holidaysQuerySchema>;
+
+export interface HolidayDto {
+  /** YYYY-MM-DD. */
+  readonly date: string;
+  readonly name: string;
+}
+
+/** Forma que o service consulta: obrigação com responsável e empresa. */
+export type ObligationWithRelations = Obligation & {
+  collaborator: Collaborator;
+  company: { id: string; name: string } | null;
+};
+
 export interface ObligationDto {
   readonly id: string;
-  readonly companyId: string | null;
   readonly title: string;
-  readonly type: string;
+  readonly type: ObligationType;
+  /** Preenchido só quando `type === 'OUTRO'`. */
+  readonly customType: string | null;
   readonly dueDate: string;
   readonly status: string;
-  readonly assignee: string;
+  readonly recurrence: Recurrence;
   readonly recurrenceGroupId: string | null;
+  readonly collaborator: {
+    readonly id: string;
+    readonly name: string;
+    readonly color: string;
+  };
+  readonly company: { readonly id: string; readonly name: string } | null;
   readonly overdue: boolean;
   /** Nome do feriado nacional que coincide com o vencimento, ou null. Nunca persistido. */
   readonly holidayConflict: string | null;
@@ -51,7 +129,7 @@ export interface ObligationDto {
 }
 
 export function toObligationDto(
-  obligation: Obligation,
+  obligation: ObligationWithRelations,
   now: Date = new Date(),
   holidays: ReadonlyMap<string, string> = new Map(),
 ): ObligationDto {
@@ -61,13 +139,19 @@ export function toObligationDto(
   const isoDay = obligation.dueDate.toISOString().slice(0, 10);
   return {
     id: obligation.id,
-    companyId: obligation.companyId,
     title: obligation.title,
-    type: obligation.type,
+    type: obligation.type as ObligationType,
+    customType: obligation.customType,
     dueDate: obligation.dueDate.toISOString(),
     status: obligation.status,
-    assignee: obligation.assignee,
+    recurrence: obligation.recurrence as Recurrence,
     recurrenceGroupId: obligation.recurrenceGroupId,
+    collaborator: {
+      id: obligation.collaborator.id,
+      name: obligation.collaborator.name,
+      color: obligation.collaborator.color,
+    },
+    company: obligation.company,
     overdue: obligation.status === 'pending' && obligation.dueDate < now,
     holidayConflict: holidays.get(isoDay) ?? null,
     createdAt: obligation.createdAt.toISOString(),

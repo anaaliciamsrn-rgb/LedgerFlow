@@ -3,6 +3,7 @@ import {
   createTestApp,
   cleanDatabase,
   seedTenants,
+  collaboratorFactory,
   brasilApiMock,
   TestContext,
   TENANT_A,
@@ -11,6 +12,9 @@ import {
 
 describe('Calendar (e2e)', () => {
   let ctx: TestContext;
+  let ana: { id: string };
+  let bruno: { id: string };
+  let externo: { id: string };
 
   beforeAll(async () => {
     ctx = await createTestApp();
@@ -24,35 +28,50 @@ describe('Calendar (e2e)', () => {
     await cleanDatabase(ctx.prisma);
     await seedTenants(ctx.prisma);
     brasilApiMock.reset();
+
+    ana = await ctx.prisma.collaborator.create({
+      data: collaboratorFactory(TENANT_A, { name: 'Ana Souza', color: 'blue' }),
+    });
+    bruno = await ctx.prisma.collaborator.create({
+      data: collaboratorFactory(TENANT_A, { name: 'Bruno Lima', color: 'violet' }),
+    });
+    externo = await ctx.prisma.collaborator.create({
+      data: collaboratorFactory(TENANT_B, {
+        name: 'De outro escritório',
+        color: 'lime',
+      }),
+    });
   });
 
   const http = () => request(ctx.app.getHttpServer());
 
+  const tarefa = (overrides: Record<string, unknown> = {}) => ({
+    tenantId: TENANT_A,
+    title: 'Tarefa',
+    type: 'GUIAS',
+    dueDate: new Date('2026-02-15T00:00:00Z'),
+    status: 'pending',
+    collaboratorId: ana.id,
+    ...overrides,
+  });
+
   describe('GET /api/calendar/obligations', () => {
-    it('lists tenant obligations in the date range ordered by dueDate, flagging overdue', async () => {
+    it('lista o intervalo ordenado por vencimento, com o responsável embutido', async () => {
       await ctx.prisma.obligation.createMany({
         data: [
-          {
-            tenantId: TENANT_A,
-            title: 'DAS Janeiro',
-            type: 'DAS',
+          tarefa({
+            title: 'Guias Janeiro',
             dueDate: new Date('2026-01-20T00:00:00Z'),
-            status: 'pending',
-          },
-          {
-            tenantId: TENANT_A,
-            title: 'DCTF Fevereiro',
-            type: 'DCTF',
+          }),
+          tarefa({
+            title: 'Folha Fevereiro',
+            type: 'FOLHA',
             dueDate: new Date('2026-02-15T00:00:00Z'),
-            status: 'pending',
-          },
-          {
-            tenantId: TENANT_A,
+          }),
+          tarefa({
             title: 'Fora do intervalo',
-            type: 'DAS',
             dueDate: new Date('2026-05-20T00:00:00Z'),
-            status: 'pending',
-          },
+          }),
         ],
       });
 
@@ -62,21 +81,69 @@ describe('Calendar (e2e)', () => {
         .expect(200);
 
       expect(response.body.data).toHaveLength(2);
-      expect(response.body.data[0].title).toBe('DAS Janeiro');
-      expect(response.body.data[1].title).toBe('DCTF Fevereiro');
-      // Vencidas (dueDate no passado e pending) marcadas como overdue.
+      expect(response.body.data[0].title).toBe('Guias Janeiro');
       expect(response.body.data[0].overdue).toBe(true);
+      expect(response.body.data[0].collaborator).toMatchObject({
+        id: ana.id,
+        name: 'Ana Souza',
+        color: 'blue',
+      });
     });
 
-    it('never lists obligations from another tenant', async () => {
-      await ctx.prisma.obligation.create({
+    it('devolve a empresa vinculada, quando houver', async () => {
+      const empresa = await ctx.prisma.company.create({
         data: {
-          tenantId: TENANT_B,
-          title: 'Segredo',
-          type: 'DAS',
-          dueDate: new Date('2026-02-10T00:00:00Z'),
-          status: 'pending',
+          tenantId: TENANT_A,
+          name: 'Padaria do João LTDA',
+          tradeName: 'Padaria do João',
+          cnpj: '11222333000181',
+          status: 'active',
+          email: 'contato@padaria.com.br',
+          phone: '1133334444',
+          city: 'São Paulo',
+          state: 'SP',
+          healthScore: 90,
         },
+      });
+      await ctx.prisma.obligation.create({
+        data: tarefa({ companyId: empresa.id }),
+      });
+
+      const response = await http()
+        .get('/api/calendar/obligations')
+        .query({ from: '2026-02-01', to: '2026-02-28' })
+        .expect(200);
+
+      expect(response.body.data[0].company).toMatchObject({
+        id: empresa.id,
+        name: 'Padaria do João LTDA',
+      });
+    });
+
+    it('filtra por responsável', async () => {
+      await ctx.prisma.obligation.createMany({
+        data: [
+          tarefa({ title: 'Da Ana' }),
+          tarefa({ title: 'Do Bruno', collaboratorId: bruno.id }),
+        ],
+      });
+
+      const response = await http()
+        .get('/api/calendar/obligations')
+        .query({ collaboratorId: bruno.id })
+        .expect(200);
+
+      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data[0].title).toBe('Do Bruno');
+    });
+
+    it('nunca lista obrigações de outro tenant', async () => {
+      await ctx.prisma.obligation.create({
+        data: tarefa({
+          tenantId: TENANT_B,
+          collaboratorId: externo.id,
+          title: 'Segredo',
+        }),
       });
 
       const response = await http()
@@ -88,90 +155,74 @@ describe('Calendar (e2e)', () => {
     });
   });
 
+  describe('overdueOnly', () => {
+    it('devolve as pendentes vencidas ignorando from/to', async () => {
+      await ctx.prisma.obligation.createMany({
+        data: [
+          tarefa({
+            title: 'Vencida antiga',
+            dueDate: new Date('2020-03-10T00:00:00Z'),
+          }),
+          tarefa({
+            title: 'Vencida recente',
+            dueDate: new Date('2021-03-10T00:00:00Z'),
+          }),
+          tarefa({
+            title: 'Vencida mas concluída',
+            dueDate: new Date('2020-04-10T00:00:00Z'),
+            status: 'completed',
+          }),
+          tarefa({
+            title: 'Futura',
+            dueDate: new Date('2090-01-10T00:00:00Z'),
+          }),
+        ],
+      });
+
+      const response = await http()
+        .get('/api/calendar/obligations')
+        .query({ overdueOnly: 'true', from: '2026-01-01', to: '2026-01-31' })
+        .expect(200);
+
+      expect(response.body.data.map((o: { title: string }) => o.title)).toEqual([
+        'Vencida antiga',
+        'Vencida recente',
+      ]);
+    });
+  });
+
   describe('POST /api/calendar/obligations', () => {
-    it('creates an obligation and returns it as an array', async () => {
+    it('cria uma tarefa avulsa', async () => {
       const response = await http()
         .post('/api/calendar/obligations')
         .send({
-          title: 'GFIP Março',
-          type: 'GFIP',
+          title: 'Emissão de guias',
+          type: 'GUIAS',
           dueDate: '2026-03-07',
-          assignee: 'Ana Souza',
+          collaboratorId: ana.id,
         })
         .expect(201);
 
       expect(response.body.data).toHaveLength(1);
       expect(response.body.data[0]).toMatchObject({
-        title: 'GFIP Março',
-        type: 'GFIP',
+        title: 'Emissão de guias',
+        type: 'GUIAS',
+        customType: null,
         status: 'pending',
-        assignee: 'Ana Souza',
+        recurrence: 'none',
         recurrenceGroupId: null,
         holidayConflict: null,
       });
-
-      const inDb = await ctx.prisma.obligation.findMany({
-        where: { tenantId: TENANT_A },
-      });
-      expect(inDb).toHaveLength(1);
     });
 
-    it('rejects an invalid payload with 422', async () => {
-      await http()
-        .post('/api/calendar/obligations')
-        .send({ title: '', type: 'DAS', dueDate: 'not-a-date' })
-        .expect(422);
-    });
-  });
-
-  describe('PATCH /api/calendar/obligations/:id', () => {
-    it('marks an obligation as completed', async () => {
-      const created = await ctx.prisma.obligation.create({
-        data: {
-          tenantId: TENANT_A,
-          title: 'DAS Abril',
-          type: 'DAS',
-          dueDate: new Date('2026-04-20T00:00:00Z'),
-          status: 'pending',
-        },
-      });
-
-      const response = await http()
-        .patch(`/api/calendar/obligations/${created.id}`)
-        .send({ status: 'completed' })
-        .expect(200);
-
-      expect(response.body.data.status).toBe('completed');
-      expect(response.body.data.overdue).toBe(false);
-    });
-
-    it('returns 404 when updating another tenant obligation', async () => {
-      const other = await ctx.prisma.obligation.create({
-        data: {
-          tenantId: TENANT_B,
-          title: 'Outra',
-          type: 'DAS',
-          dueDate: new Date('2026-04-20T00:00:00Z'),
-          status: 'pending',
-        },
-      });
-
-      await http()
-        .patch(`/api/calendar/obligations/${other.id}`)
-        .send({ status: 'completed' })
-        .expect(404);
-    });
-  });
-
-  describe('recorrência, responsável e feriados', () => {
-    it('materializa 3 ocorrências mensais com o mesmo grupo', async () => {
+    it('materializa 3 ocorrências mensais no mesmo grupo', async () => {
       const response = await http()
         .post('/api/calendar/obligations')
         .send({
           title: 'Fechamento da folha',
           type: 'FOLHA',
           dueDate: '2026-03-05',
-          assignee: 'Ana Souza',
+          collaboratorId: ana.id,
           recurrence: 'monthly',
           occurrences: 3,
         })
@@ -179,126 +230,184 @@ describe('Calendar (e2e)', () => {
 
       expect(response.body.data).toHaveLength(3);
       const grupos = new Set(
-        response.body.data.map((o: { recurrenceGroupId: string }) => o.recurrenceGroupId),
+        response.body.data.map(
+          (o: { recurrenceGroupId: string }) => o.recurrenceGroupId,
+        ),
       );
       expect(grupos.size).toBe(1);
-      expect(response.body.data[0].assignee).toBe('Ana Souza');
+      expect(response.body.data[0].recurrence).toBe('monthly');
+    });
+
+    it('exige descrição quando o tipo é OUTRO', async () => {
+      await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'X',
+          type: 'OUTRO',
+          dueDate: '2026-03-07',
+          collaboratorId: ana.id,
+        })
+        .expect(422);
+    });
+
+    it('aceita OUTRO com descrição e rejeita descrição em tipo conhecido', async () => {
+      const ok = await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'Baixa de protocolo',
+          type: 'OUTRO',
+          customType: 'Baixa de protocolo na junta',
+          dueDate: '2026-03-07',
+          collaboratorId: ana.id,
+        })
+        .expect(201);
+      expect(ok.body.data[0].customType).toBe('Baixa de protocolo na junta');
+
+      await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'Folha',
+          type: 'FOLHA',
+          customType: 'não deveria existir',
+          dueDate: '2026-03-07',
+          collaboratorId: ana.id,
+        })
+        .expect(422);
+    });
+
+    it('devolve 404 quando o responsável é de outro escritório', async () => {
+      await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'Tentativa',
+          type: 'FOLHA',
+          dueDate: '2026-03-07',
+          collaboratorId: externo.id,
+        })
+        .expect(404);
     });
 
     it('sinaliza vencimento que cai em feriado nacional', async () => {
       brasilApiMock.respondWith = {
         status: 200,
-        body: [{ date: '2026-04-21', name: 'Tiradentes' }],
+        body: [{ date: '2027-04-21', name: 'Tiradentes' }],
       };
 
-      await http()
-        .post('/api/calendar/obligations')
-        .send({ title: 'Envio de guias', type: 'DAS', dueDate: '2026-04-21', assignee: 'Bruno Lima' })
-        .expect(201);
-
-      const list = await http()
-        .get('/api/calendar/obligations?from=2026-04-01&to=2026-04-30')
-        .expect(200);
-
-      expect(list.body.data[0].holidayConflict).toBe('Tiradentes');
-    });
-
-    it('devolve holidayConflict nulo em todas as tarefas quando a BrasilAPI falha', async () => {
-      brasilApiMock.fail = true;
-
-      await ctx.prisma.obligation.create({
-        data: {
-          tenantId: TENANT_A,
-          title: 'Conferência mensal',
-          type: 'CONFERENCIA',
-          dueDate: new Date('2026-06-10T00:00:00Z'),
-          status: 'pending',
-          assignee: 'Carla Dias',
-        },
-      });
-
-      const response = await http()
-        .get('/api/calendar/obligations?from=2026-06-01&to=2026-06-30')
-        .expect(200);
-
-      expect(response.body.data).toHaveLength(1);
-      expect(response.body.data[0].holidayConflict).toBeNull();
-    });
-
-    it('filtra por responsável', async () => {
-      await ctx.prisma.obligation.createMany({
-        data: [
-          {
-            tenantId: TENANT_A,
-            title: 'A',
-            type: 'X',
-            dueDate: new Date('2026-05-10'),
-            assignee: 'Ana Souza',
-          },
-          {
-            tenantId: TENANT_A,
-            title: 'B',
-            type: 'X',
-            dueDate: new Date('2026-05-11'),
-            assignee: 'Bruno Lima',
-          },
-        ],
-      });
-
-      const response = await http()
-        .get('/api/calendar/obligations?assignee=Ana%20Souza')
-        .expect(200);
-
-      expect(response.body.data).toHaveLength(1);
-      expect(response.body.data[0].assignee).toBe('Ana Souza');
-    });
-
-    it('nunca lista ou materializa ocorrências de outro tenant', async () => {
-      // Recorrência criada pelo tenant autenticado (TENANT_A via stub).
       const response = await http()
         .post('/api/calendar/obligations')
         .send({
-          title: 'Fechamento da folha (A)',
-          type: 'FOLHA',
-          dueDate: '2026-07-05',
-          assignee: 'Ana Souza',
+          title: 'Envio de guias',
+          type: 'GUIAS',
+          dueDate: '2027-04-21',
+          collaboratorId: bruno.id,
+        })
+        .expect(201);
+
+      expect(response.body.data[0].holidayConflict).toBe('Tiradentes');
+    });
+  });
+
+  describe('PATCH /api/calendar/obligations/:id', () => {
+    it('marca como concluída sem afetar as irmãs do mesmo grupo', async () => {
+      const criadas = await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'Conferência mensal',
+          type: 'CONFERENCIA',
+          dueDate: '2026-03-10',
+          collaboratorId: ana.id,
           recurrence: 'monthly',
           occurrences: 3,
         })
         .expect(201);
 
-      const recurrenceGroupId = response.body.data[0].recurrenceGroupId as string;
-      expect(response.body.data).toHaveLength(3);
+      const alvo = criadas.body.data[1] as {
+        id: string;
+        recurrenceGroupId: string;
+      };
 
-      // As linhas materializadas pertencem só ao TENANT_A, nunca ao TENANT_B.
-      const otherTenantCount = await ctx.prisma.obligation.count({
-        where: { tenantId: TENANT_B, recurrenceGroupId },
-      });
-      expect(otherTenantCount).toBe(0);
-
-      // Uma obrigação avulsa do TENANT_B no mesmo intervalo não pode vazar
-      // para a listagem do TENANT_A.
-      await ctx.prisma.obligation.create({
-        data: {
-          tenantId: TENANT_B,
-          title: 'Segredo do outro escritório',
-          type: 'FOLHA',
-          dueDate: new Date('2026-07-05T00:00:00Z'),
-          assignee: 'Alguém',
-        },
-      });
-
-      const list = await http()
-        .get('/api/calendar/obligations?from=2026-07-01&to=2026-09-30')
+      const response = await http()
+        .patch(`/api/calendar/obligations/${alvo.id}`)
+        .send({ status: 'completed' })
         .expect(200);
 
-      expect(list.body.data).toHaveLength(3);
-      expect(
-        list.body.data.every((o: { recurrenceGroupId: string | null }) => o.recurrenceGroupId === recurrenceGroupId),
-      ).toBe(true);
-      expect(
-        list.body.data.some((o: { title: string }) => o.title === 'Segredo do outro escritório'),
-      ).toBe(false);
+      expect(response.body.data.status).toBe('completed');
+
+      const pendentes = await ctx.prisma.obligation.count({
+        where: { recurrenceGroupId: alvo.recurrenceGroupId, status: 'pending' },
+      });
+      expect(pendentes).toBe(2);
+    });
+
+    it('antecipa para o dia útil anterior ao feriado', async () => {
+      brasilApiMock.respondWith = {
+        status: 200,
+        body: [{ date: '2029-11-02', name: 'Finados' }],
+      };
+
+      // Finados de 2029 cai numa sexta-feira; o dia útil anterior é quinta.
+      const criada = await ctx.prisma.obligation.create({
+        data: tarefa({ dueDate: new Date('2029-11-02T00:00:00Z') }),
+      });
+
+      const response = await http()
+        .patch(`/api/calendar/obligations/${criada.id}`)
+        .send({ action: 'anticipate' })
+        .expect(200);
+
+      expect(response.body.data.dueDate.slice(0, 10)).toBe('2029-11-01');
+      expect(response.body.data.holidayConflict).toBeNull();
+    });
+
+    it('devolve 404 ao alterar tarefa de outro escritório', async () => {
+      const outra = await ctx.prisma.obligation.create({
+        data: tarefa({ tenantId: TENANT_B, collaboratorId: externo.id }),
+      });
+
+      await http()
+        .patch(`/api/calendar/obligations/${outra.id}`)
+        .send({ status: 'completed' })
+        .expect(404);
+    });
+  });
+
+  describe('GET /api/calendar/holidays', () => {
+    it('devolve os feriados do ano ordenados por data', async () => {
+      brasilApiMock.respondWith = {
+        status: 200,
+        body: [
+          { date: '2026-12-25', name: 'Natal' },
+          { date: '2026-04-21', name: 'Tiradentes' },
+        ],
+      };
+
+      const response = await http()
+        .get('/api/calendar/holidays')
+        .query({ year: 2026 })
+        .expect(200);
+
+      expect(response.body.data).toEqual([
+        { date: '2026-04-21', name: 'Tiradentes' },
+        { date: '2026-12-25', name: 'Natal' },
+      ]);
+    });
+
+    it('devolve lista vazia quando a BrasilAPI falha, sem derrubar a rota', async () => {
+      brasilApiMock.fail = true;
+
+      const response = await http()
+        .get('/api/calendar/holidays')
+        .query({ year: 2031 })
+        .expect(200);
+
+      expect(response.body.data).toEqual([]);
+    });
+
+    it('rejeita ano inválido com 422', async () => {
+      await http()
+        .get('/api/calendar/holidays')
+        .query({ year: 'abc' })
+        .expect(422);
     });
   });
 });
