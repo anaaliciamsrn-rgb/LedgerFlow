@@ -33,10 +33,11 @@ model Tenant {
 
   createdAt DateTime @default(now())
 
-  companies    Company[]
-  activityLogs ActivityLog[]
-  auditRuns    AuditRun[]
-  obligations  Obligation[]
+  companies     Company[]
+  activityLogs  ActivityLog[]
+  auditRuns     AuditRun[]
+  obligations   Obligation[]
+  collaborators Collaborator[]
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -103,25 +104,53 @@ model Partner {
   @@index([companyId])
 }
 
-model Obligation {
-  id        String   @id @default(cuid())
-  tenantId  String
-  companyId String?
-  title     String
-  type      String // ex.: DAS, DCTF, GFIP, FGTS
-  dueDate   DateTime
-  status    String   @default("pending") // pending | completed
+/// Responsável pelas tarefas do escritório. Não é uma conta de acesso —
+/// é um rótulo com cor, usado para organizar e colorir o calendário.
+model Collaborator {
+  id       String  @id @default(cuid())
+  tenantId String
+  name     String
+  /// Token da paleta (blue|violet|emerald|amber|rose|cyan|orange|lime).
+  /// Guardamos o token, nunca um hex: o tema claro/escuro resolve o valor.
+  color    String
+  /// Desativado some da escolha de tarefas novas, mas preserva o histórico.
+  active   Boolean @default(true)
 
-  assignee          String  @default("")
+  createdAt DateTime @default(now())
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  obligations Obligation[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, active])
+}
+
+model Obligation {
+  id             String @id @default(cuid())
+  tenantId       String
+  companyId      String?
+  collaboratorId String
+  title          String
+  /// FOLHA | DOCUMENTOS | GUIAS | CONFERENCIA | OUTRO
+  type           String
+  /// Preenchido só quando `type = OUTRO`; nulo nos demais.
+  customType     String?
+  dueDate        DateTime
+  status         String @default("pending") // pending | completed
+  /// none | weekly | biweekly | monthly | quarterly | yearly
+  recurrence     String @default("none")
+  /// Agrupa as ocorrências geradas do mesmo cadastro.
   recurrenceGroupId String?
 
   createdAt DateTime @default(now())
 
-  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  company      Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  collaborator Collaborator @relation(fields: [collaboratorId], references: [id])
 
   @@index([tenantId, dueDate])
-  @@index([tenantId, assignee])
+  @@index([tenantId, collaboratorId])
+  @@index([tenantId, status, dueDate])
 }
 
 model AuditRun {

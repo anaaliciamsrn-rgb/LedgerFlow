@@ -4,7 +4,11 @@ const prisma = new PrismaClient();
 
 const TENANT_ID = 'tnt_dev';
 
-const RESPONSAVEIS = ['Ana Souza', 'Bruno Lima', 'Carla Dias'] as const;
+const RESPONSAVEIS = [
+  { name: 'Ana Souza', color: 'blue' },
+  { name: 'Bruno Lima', color: 'violet' },
+  { name: 'Carla Dias', color: 'emerald' },
+] as const;
 
 const COMPANIES = [
   {
@@ -162,6 +166,22 @@ async function main(): Promise<void> {
 
   await prisma.obligation.deleteMany({ where: { tenantId: TENANT_ID } });
 
+  // Colaboradores primeiro: a obrigação depende do id deles. `upsert` mantém
+  // o seed idempotente — rodar duas vezes não duplica nem apaga o histórico.
+  const colaboradores = await Promise.all(
+    RESPONSAVEIS.map((responsavel) =>
+      prisma.collaborator.upsert({
+        where: { tenantId_name: { tenantId: TENANT_ID, name: responsavel.name } },
+        update: { color: responsavel.color, active: true },
+        create: {
+          tenantId: TENANT_ID,
+          name: responsavel.name,
+          color: responsavel.color,
+        },
+      }),
+    ),
+  );
+
   const hoje = new Date();
   const mes = (offset: number, dia: number): Date =>
     new Date(hoje.getFullYear(), hoje.getMonth() + offset, dia);
@@ -180,17 +200,19 @@ async function main(): Promise<void> {
         type: 'FOLHA',
         dueDate: mes(offset, 5),
         status: offset === 0 ? 'completed' : 'pending',
-        assignee: RESPONSAVEIS[0],
+        collaboratorId: colaboradores[0].id,
+        recurrence: 'monthly',
         recurrenceGroupId: grupoFolha,
       })),
       ...[0, 1, 2].map((offset) => ({
         tenantId: TENANT_ID,
         companyId: companies[1]?.id ?? null,
         title: 'Emissão de guias DAS',
-        type: 'DAS',
+        type: 'GUIAS',
         dueDate: mes(offset, 20),
         status: 'pending',
-        assignee: RESPONSAVEIS[1],
+        collaboratorId: colaboradores[1].id,
+        recurrence: 'monthly',
         recurrenceGroupId: grupoGuias,
       })),
       {
@@ -198,9 +220,9 @@ async function main(): Promise<void> {
         companyId: companies[2]?.id ?? null,
         title: 'Envio de documentos ao cliente',
         type: 'DOCUMENTOS',
-        dueDate: mes(-1, 10), // vencida — demonstra o selo de atraso
+        dueDate: mes(-1, 10), // vencida — demonstra a faixa de atrasadas
         status: 'pending',
-        assignee: RESPONSAVEIS[2],
+        collaboratorId: colaboradores[2].id,
       },
       {
         tenantId: TENANT_ID,
@@ -209,7 +231,7 @@ async function main(): Promise<void> {
         type: 'CONFERENCIA',
         dueDate: new Date(hoje.getFullYear() + 1, 0, 1), // 1º de janeiro = feriado
         status: 'pending',
-        assignee: RESPONSAVEIS[0],
+        collaboratorId: colaboradores[0].id,
       },
     ],
   });

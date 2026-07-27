@@ -68,6 +68,7 @@ export async function cleanDatabase(prisma: PrismaService): Promise<void> {
   await prisma.auditFinding.deleteMany();
   await prisma.auditRun.deleteMany();
   await prisma.obligation.deleteMany();
+  await prisma.collaborator.deleteMany();
   await prisma.activityLog.deleteMany();
   await prisma.company.deleteMany();
   await prisma.tenant.deleteMany();
@@ -83,6 +84,18 @@ export async function seedTenants(prisma: PrismaService): Promise<void> {
       { id: TENANT_B, name: 'Escritório B', slug: 'escritorio-b' },
     ],
   });
+}
+
+export function collaboratorFactory(
+  tenantId: string,
+  overrides: Partial<{ name: string; color: string; active: boolean }> = {},
+) {
+  return {
+    tenantId,
+    name: overrides.name ?? 'Ana Souza',
+    color: overrides.color ?? 'blue',
+    active: overrides.active ?? true,
+  };
 }
 
 export function companyFactory(
