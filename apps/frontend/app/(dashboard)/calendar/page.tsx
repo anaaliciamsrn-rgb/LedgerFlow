@@ -1,5 +1,5 @@
-import { ComingSoon } from '@/components/ui/coming-soon';
+import { CalendarView } from '@/features/calendar/components/calendar-view';
 
 export default function CalendarPage(): React.ReactNode {
-  return <ComingSoon title="Calendário" />;
+  return <CalendarView />;
 }
