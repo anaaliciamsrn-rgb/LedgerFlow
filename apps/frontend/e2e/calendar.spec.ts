@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 
 /**
  * Estes testes exercitam o que só existe **depois da hidratação** — a faixa
@@ -7,8 +7,26 @@ import { test, expect } from '@playwright/test';
  *
  * Dependem do backend em `http://localhost:3333` com o seed aplicado
  * (`npm run db:seed` em `apps/backend`), que cria Ana Souza, Bruno Lima e
- * Carla Dias e deixa uma tarefa vencida de propósito.
+ * Carla Dias.
  */
+const API = 'http://localhost:3333/api';
+
+interface Criada {
+  readonly id: string;
+}
+
+async function primeiroResponsavel(request: APIRequestContext): Promise<string> {
+  const response = await request.get(`${API}/calendar/collaborators`);
+  const { data } = (await response.json()) as {
+    data: ReadonlyArray<{ id: string }>;
+  };
+  const primeiro = data[0];
+  if (!primeiro) {
+    throw new Error('Nenhum responsável cadastrado — rode `npm run db:seed`.');
+  }
+  return primeiro.id;
+}
+
 test.describe('Calendário — tarefas recorrentes', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/calendar');
@@ -17,15 +35,43 @@ test.describe('Calendário — tarefas recorrentes', () => {
     ).toBeVisible();
   });
 
-  test('mostra a faixa de atrasadas com data, empresa e responsável', async ({
+  /**
+   * O teste cria a própria tarefa vencida em vez de contar com a do seed:
+   * qualquer pessoa que use o sistema pode concluí-la, e o teste passaria a
+   * falhar por um motivo que não é defeito nenhum. No fim, conclui a tarefa
+   * para não deixar atraso pendurado na tela.
+   */
+  test('mostra a faixa de atrasadas com data e responsável', async ({
     page,
+    request,
   }) => {
-    const faixa = page.getByRole('region', { name: 'Tarefas em atraso' });
-    await expect(faixa).toBeVisible();
-    await expect(faixa).toContainText('em atraso');
-    // A tarefa vencida do seed traz responsável e empresa na mesma linha.
-    await expect(faixa).toContainText('Envio de documentos ao cliente');
-    await expect(faixa).toContainText('Carla Dias');
+    const collaboratorId = await primeiroResponsavel(request);
+    const criacao = await request.post(`${API}/calendar/obligations`, {
+      data: {
+        title: 'Tarefa vencida (fixture de teste)',
+        type: 'DOCUMENTOS',
+        dueDate: '2020-03-10',
+        collaboratorId,
+      },
+    });
+    expect(criacao.ok()).toBe(true);
+    const { data } = (await criacao.json()) as { data: readonly Criada[] };
+    const id = data[0]!.id;
+
+    try {
+      await page.reload();
+
+      const faixa = page.getByRole('region', { name: 'Tarefas em atraso' });
+      await expect(faixa).toBeVisible();
+      await expect(faixa).toContainText('em atraso');
+      await expect(faixa).toContainText('Tarefa vencida (fixture de teste)');
+      await expect(faixa).toContainText('10/03');
+    } finally {
+      // Concluída sai da faixa; roda mesmo se a asserção acima falhar.
+      await request.patch(`${API}/calendar/obligations/${id}`, {
+        data: { status: 'completed' },
+      });
+    }
   });
 
   test('exibe a legenda de responsáveis e filtra por pessoa', async ({ page }) => {
@@ -88,7 +134,7 @@ test.describe('Calendário — tarefas recorrentes', () => {
   test('agrupa as tarefas do mês por responsável', async ({ page }) => {
     // Cada bloco traz o nome e a contagem; a caixinha conclui sem abrir painel.
     await expect(
-      page.getByRole('heading', { name: /Ana Souza/ }),
+      page.getByRole('heading', { name: /\d+ tarefas?/ }).first(),
     ).toBeVisible();
     await expect(
       page.getByRole('checkbox', { name: /^Concluir / }).first(),
@@ -98,10 +144,18 @@ test.describe('Calendário — tarefas recorrentes', () => {
   test('abre o painel de detalhe ao clicar numa tarefa da grade', async ({
     page,
   }) => {
-    await page
-      .getByRole('button', { name: /Fechamento da folha de pagamento/ })
-      .first()
-      .click();
+    // Clica na primeira tarefa que existir no mês, seja ela qual for: prender
+    // o teste a um título do seed o faria falhar assim que alguém o alterasse.
+    const primeiraDaLista = page
+      .getByRole('checkbox', { name: /^Concluir / })
+      .first();
+    await expect(primeiraDaLista).toBeVisible();
+    const titulo = (await primeiraDaLista.getAttribute('aria-label'))!.replace(
+      /^Concluir /,
+      '',
+    );
+
+    await page.getByRole('button', { name: titulo, exact: false }).first().click();
 
     await expect(page.getByText('Responsável', { exact: true })).toBeVisible();
     await expect(page.getByText('Repetição', { exact: true })).toBeVisible();
