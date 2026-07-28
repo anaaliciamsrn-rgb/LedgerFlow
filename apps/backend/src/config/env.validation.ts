@@ -35,21 +35,12 @@ export const envSchema = z
     }
 
     /**
-     * `AUTH_MODE=stub` aceita o tenant vindo do header `x-tenant-id`: quem
-     * souber a URL lê a carteira de qualquer escritório. É aceitável no
-     * desenvolvimento e inaceitável num domínio público — por isso o processo
-     * se recusa a subir assim, em vez de depender de alguém lembrar.
+     * `AUTH_MODE=stub` em produção é uma decisão consciente do projeto: o
+     * sistema não tem autenticação, e o escritório vem do header
+     * `x-tenant-id`. Quem conhecer a URL lê a carteira de qualquer
+     * escritório. O processo sobe assim, mas avisa no arranque (ver
+     * `main.ts`) — a escolha fica registrada no log em vez de silenciosa.
      */
-    if (env.AUTH_MODE === 'stub') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['AUTH_MODE'],
-        message:
-          'AUTH_MODE=stub não pode rodar em produção: o tenant viria do header ' +
-          'x-tenant-id e qualquer pessoa leria os dados de qualquer escritório. ' +
-          'Use AUTH_MODE=jwt.',
-      });
-    }
 
     /**
      * Sem lista de origens o CORS refletiria qualquer site que chamasse a API.

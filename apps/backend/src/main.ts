@@ -44,6 +44,22 @@ async function bootstrap(): Promise<void> {
   // no deploy, e sem isso as conexões do Prisma ficariam penduradas.
   app.enableShutdownHooks();
 
+  /**
+   * O sistema não tem autenticação: em `AUTH_MODE=stub` o escritório vem do
+   * header `x-tenant-id`, que qualquer cliente pode escolher. É uma decisão
+   * do projeto, não um descuido — mas precisa aparecer no log de quem operar
+   * o serviço, e não ficar escondida num arquivo de configuração.
+   */
+  if (isProduction && config.get<string>('AUTH_MODE') !== 'jwt') {
+    Logger.warn(
+      'API PÚBLICA E SEM AUTENTICAÇÃO: o escritório é definido pelo header ' +
+        'x-tenant-id, então quem souber esta URL consegue ler os dados de ' +
+        'qualquer escritório. Restrinja o acesso por outro meio ou ative a ' +
+        'autenticação antes de usar com dados reais de clientes.',
+      'Bootstrap',
+    );
+  }
+
   const port = config.get<number>('PORT') ?? 3333;
   await app.listen(port);
 
