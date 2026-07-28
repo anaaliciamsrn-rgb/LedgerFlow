@@ -14,6 +14,9 @@ services:
     name: ledgerflow-api
     runtime: node
     plan: free
+    # Explícito de propósito: sem isto o Render adota a branch padrão do
+    # repositório, e um fork pode ter outra.
+    branch: main
     rootDir: apps/backend
     # `--include=dev` é obrigatório: as variáveis do serviço valem também no
     # build, e com NODE_ENV=production o npm descarta as dependências de
