@@ -71,10 +71,11 @@ jobs:
       NEXT_PUBLIC_USE_MOCKS: 'false'
       NEXT_PUBLIC_API_TIMEOUT: '30000'
       DATABASE_URL: 'file:./e2e.db'
-      # jwt, e nao stub: e o modo que vai para producao. Testar so o stub
-      # deixaria justamente o caminho real sem cobertura.
-      AUTH_MODE: 'jwt'
-      JWT_SECRET: 'segredo-exclusivo-da-ci-com-mais-de-32-caracteres'
+      AUTH_MODE: 'stub'
+      # Precisa bater com o TENANT_ID do seed, senao o guard resolve um tenant
+      # sem dado nenhum e a tela abre vazia.
+      STUB_TENANT_ID: 'tnt_dev'
+      STUB_USER_ID: 'usr_dev'
       # BrasilAPI falsa: a real deixaria a CI refem da rede e do rate limit de
       # terceiro, e sem feriado algum o teste do aviso de feriado nao teria o
       # que verificar.

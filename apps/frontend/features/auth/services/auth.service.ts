@@ -5,22 +5,6 @@ import type { UserSession } from '@/types/session.types';
 import type { ApiResponse } from '@/types/api.types';
 
 export const authService = {
-  /**
-   * Autentica no servidor. O token volta num cookie httpOnly que o navegador
-   * guarda sozinho — nada de token no JavaScript daqui, senão um XSS o levaria
-   * embora. Por isso a resposta traz apenas os dados de exibição.
-   */
-  async login(email: string, password: string): Promise<UserSession> {
-    if (config.useMocks) {
-      return MOCK_SESSION;
-    }
-    const response = await httpClient.post<ApiResponse<UserSession>>(
-      '/auth/login',
-      { email, password },
-    );
-    return response.data;
-  },
-
   async getSession(signal?: AbortSignal): Promise<UserSession | null> {
     if (config.useMocks) {
       return MOCK_SESSION;

@@ -1,8 +1,7 @@
 'use client';
 
-import { Search, Bell, LogOut } from 'lucide-react';
+import { Search, Bell } from 'lucide-react';
 import { useSession } from '@/features/auth/hooks/use-session';
-import { useLogout } from '@/features/auth/hooks/use-logout';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 
@@ -15,7 +14,6 @@ function getInitials(name: string): string {
 
 export function Topbar(): React.ReactNode {
   const { session } = useSession();
-  const { logout, isPending } = useLogout();
   const user = session?.user ?? null;
 
   return (
@@ -57,16 +55,6 @@ export function Topbar(): React.ReactNode {
               {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt={user.name} /> : null}
               <AvatarFallback>{getInitials(user.name)}</AvatarFallback>
             </Avatar>
-            <button
-              type="button"
-              onClick={() => void logout()}
-              disabled={isPending}
-              aria-label="Sair"
-              title="Sair"
-              className="flex size-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-            >
-              <LogOut className="size-4" />
-            </button>
           </div>
         ) : null}
       </div>

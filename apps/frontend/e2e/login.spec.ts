@@ -64,46 +64,6 @@ test.describe('Login', () => {
     await expect(password).toHaveAttribute('type', 'text');
   });
 
-  /**
-   * O login deixou de ser encenação (antes era um `setTimeout` e um redirect),
-   * então o caminho real precisa de teste: sem sessão não se entra, com
-   * credencial errada não se entra, e com credencial certa se chega ao
-   * sistema e se consegue sair.
-   */
-  test('protege rotas internas de quem não está autenticado', async ({ page }) => {
-    await page.goto('/calendar');
-    await expect(page).toHaveURL(/\/login/);
-    await expect(
-      page.getByRole('heading', { name: 'Bem-vindo de volta' }),
-    ).toBeVisible();
-  });
-
-  test('recusa credenciais inválidas sem entrar', async ({ page }) => {
-    await page.goto('/login');
-    await page.locator('#email').fill('admin@contabilidademodelo.com.br');
-    await page.locator('#password').fill('senha-errada-de-proposito');
-    await page.getByRole('button', { name: 'Entrar' }).click();
-
-    await expect(page.getByText('E-mail ou senha inválidos.')).toBeVisible();
-    await expect(page).toHaveURL(/\/login/);
-  });
-
-  test('entra com credenciais válidas e consegue sair', async ({ page }) => {
-    await page.goto('/login');
-    await page.locator('#email').fill('admin@contabilidademodelo.com.br');
-    await page.locator('#password').fill('trocar-esta-senha');
-    await page.getByRole('button', { name: 'Entrar' }).click();
-
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15_000 });
-
-    await page.getByRole('button', { name: 'Sair' }).click();
-    await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
-
-    // Depois de sair, a rota interna volta a ser bloqueada.
-    await page.goto('/calendar');
-    await expect(page).toHaveURL(/\/login/);
-  });
-
   test('renders correctly on a mobile viewport without horizontal scroll', async ({
     page,
   }) => {
