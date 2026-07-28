@@ -1,21 +1,8 @@
 import { PrismaClient } from '@prisma/client';
-import { hashPassword } from '../src/auth/password';
 
 const prisma = new PrismaClient();
 
 const TENANT_ID = 'tnt_dev';
-
-/**
- * Usuário inicial. A senha vem de `SEED_USER_PASSWORD` quando definida —
- * fixar uma senha no código publicaria a credencial de acesso no repositório.
- * O padrão só existe para o ambiente de desenvolvimento.
- */
-const SEED_USER = {
-  email: process.env.SEED_USER_EMAIL ?? 'admin@contabilidademodelo.com.br',
-  password: process.env.SEED_USER_PASSWORD ?? 'trocar-esta-senha',
-  name: 'Administrador',
-  role: 'owner',
-} as const;
 
 const RESPONSAVEIS = [
   { name: 'Ana Souza', color: 'blue' },
@@ -146,20 +133,6 @@ async function main(): Promise<void> {
     },
   });
 
-  // `update` não mexe na senha: rodar o seed de novo não pode sobrescrever
-  // uma senha que o usuário já trocou.
-  const usuario = await prisma.user.upsert({
-    where: { email: SEED_USER.email },
-    update: { name: SEED_USER.name, role: SEED_USER.role, active: true },
-    create: {
-      tenantId: TENANT_ID,
-      name: SEED_USER.name,
-      email: SEED_USER.email,
-      role: SEED_USER.role,
-      passwordHash: await hashPassword(SEED_USER.password),
-    },
-  });
-
   for (const company of COMPANIES) {
     // `update` precisa reaplicar os campos: com `update: {}` um registro
     // criado por uma versão anterior do seed nunca ganharia as colunas novas,
@@ -273,13 +246,6 @@ async function main(): Promise<void> {
   console.log(
     `Seed concluído: tenant ${TENANT_ID} com ${count} empresas e ${obrigacoes} obrigações.`,
   );
-  console.log(`Usuário de acesso: ${usuario.email}`);
-  if (!process.env.SEED_USER_PASSWORD) {
-    console.log(
-      'Senha padrão de desenvolvimento: "trocar-esta-senha". ' +
-        'Defina SEED_USER_PASSWORD antes de semear qualquer ambiente exposto.',
-    );
-  }
 }
 
 main()

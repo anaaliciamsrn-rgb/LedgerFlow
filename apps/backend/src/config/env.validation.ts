@@ -23,17 +23,6 @@ export const envSchema = z
      * Ex.: `https://ledgerflow.vercel.app,https://app.escritorio.com.br`
      */
     CORS_ORIGINS: z.string().default(''),
-    /**
-     * Chave que assina o token de sessão. Obrigatória sempre que
-     * `AUTH_MODE=jwt` — sem ela, qualquer um forjaria um token.
-     */
-    JWT_SECRET: z.string().default(''),
-    /**
-     * `true` quando frontend e API estão em domínios diferentes, o que exige
-     * cookie `SameSite=None`. O arranjo recomendado é o mesmo domínio (ver
-     * docs/DEPLOY.md), então o padrão é `false`.
-     */
-    CROSS_SITE_COOKIE: z.enum(['true', 'false']).default('false'),
     STUB_TENANT_ID: z.string().default('tnt_dev'),
     STUB_USER_ID: z.string().default('usr_dev'),
     STUB_ROLE: z
@@ -41,21 +30,6 @@ export const envSchema = z
       .default('owner'),
   })
   .superRefine((env, ctx) => {
-    /**
-     * Vale em qualquer ambiente: `AUTH_MODE=jwt` sem chave de assinatura
-     * deixaria o servidor aceitando tokens que ele mesmo não consegue
-     * validar — falha silenciosa que só apareceria no primeiro login.
-     */
-    if (env.AUTH_MODE === 'jwt' && env.JWT_SECRET.length < 32) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['JWT_SECRET'],
-        message:
-          'AUTH_MODE=jwt exige JWT_SECRET com ao menos 32 caracteres. ' +
-          'Gere uma com: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'base64url\'))"',
-      });
-    }
-
     if (env.NODE_ENV !== 'production') {
       return;
     }

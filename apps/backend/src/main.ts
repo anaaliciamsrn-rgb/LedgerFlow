@@ -3,7 +3,6 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { json, urlencoded } from 'express';
-import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { corsOrigins } from './config/env.validation';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
@@ -18,9 +17,6 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.use(json({ limit: BODY_LIMIT }));
   app.use(urlencoded({ extended: true, limit: BODY_LIMIT }));
-  // O token de sessão vive num cookie httpOnly; sem este parser o guard não
-  // enxerga `req.cookies` e toda requisição autenticada viraria 401.
-  app.use(cookieParser());
 
   const config = app.get(ConfigService);
 

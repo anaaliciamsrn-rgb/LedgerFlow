@@ -1,67 +1,94 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Post,
-  Res,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Response } from 'express';
+import { NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import { TenantContextGuard } from '../common/guards/tenant-context.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthContext } from '../common/auth/auth-context';
-import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
-import { AuthService } from './auth.service';
-import { SESSION_COOKIE, sessionCookieOptions } from './session-cookie';
-import { loginSchema, type LoginInput, type SessionDto } from './auth.schema';
 
+interface SessionUserDto {
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
+  readonly role: string;
+  readonly avatarUrl: string | null;
+}
+
+interface SessionTenantDto {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly logoUrl: string | null;
+  readonly theme: {
+    readonly primaryColor: string;
+    readonly accentColor: string;
+  };
+}
+
+interface SessionDto {
+  readonly user: SessionUserDto;
+  readonly tenant: SessionTenantDto;
+  readonly expiresAt: string;
+}
+
+const SESSION_HOURS = 8;
+
+/**
+ * Sessão do usuário logado.
+ *
+ * O brief do cliente não pede autenticação, mas o frontend precisa saber
+ * QUAL tenant está exibindo — é daqui que ele lê o nome, o logo e as cores
+ * que sustentam o white label. Enquanto `AUTH_MODE=stub`, a identidade vem
+ * do `TenantContextGuard` (headers/env) e o tenant vem do banco.
+ *
+ * Quando a autenticação real existir, só este arquivo muda: o contrato
+ * devolvido ao frontend continua o mesmo.
+ */
+@UseGuards(TenantContextGuard)
 @Controller('auth')
 export class AuthController {
   constructor(
-    private readonly auth: AuthService,
+    private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {}
 
-  private cookieOptions() {
-    return sessionCookieOptions(
-      this.config.get<string>('NODE_ENV') === 'production',
-      this.config.get<string>('CROSS_SITE_COOKIE') === 'true',
-    );
-  }
-
-  /**
-   * Rota pública — é a única que pode ser, já que é ela quem cria a sessão.
-   *
-   * O token vai **só** no cookie httpOnly; o corpo devolve apenas os dados de
-   * exibição. Devolvê-lo no JSON permitiria que o JavaScript da página o
-   * guardasse, e aí o `httpOnly` não protegeria nada.
-   */
-  @Post('login')
-  @HttpCode(200)
-  async login(
-    @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<SessionDto> {
-    const { token, session } = await this.auth.login(body);
-    res.cookie(SESSION_COOKIE, token, this.cookieOptions());
-    return session;
-  }
-
   @Get('session')
-  @UseGuards(TenantContextGuard)
-  getSession(@CurrentUser() auth: AuthContext): Promise<SessionDto> {
-    return this.auth.getSession(auth.userId, auth.tenantId);
+  async getSession(@CurrentUser() auth: AuthContext): Promise<SessionDto> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: auth.tenantId },
+    });
+    if (!tenant) {
+      throw new NotFoundException('Tenant não encontrado');
+    }
+
+    const expiresAt = new Date(Date.now() + SESSION_HOURS * 60 * 60 * 1000);
+
+    return {
+      user: {
+        id: auth.userId,
+        name: this.config.get<string>('STUB_USER_NAME') ?? 'Usuário',
+        email: this.config.get<string>('STUB_USER_EMAIL') ?? 'usuario@exemplo.com.br',
+        role: auth.role,
+        avatarUrl: null,
+      },
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        logoUrl: tenant.logoUrl,
+        theme: {
+          primaryColor: tenant.primaryColor,
+          accentColor: tenant.accentColor,
+        },
+      },
+      expiresAt: expiresAt.toISOString(),
+    };
   }
 
-  /**
-   * Sem guard de propósito: sair deve funcionar mesmo com token expirado ou
-   * corrompido — o objetivo é justamente apagar o cookie.
-   */
   @Post('logout')
   @HttpCode(204)
-  logout(@Res({ passthrough: true }) res: Response): void {
-    res.clearCookie(SESSION_COOKIE, { ...this.cookieOptions(), maxAge: undefined });
+  logout(): void {
+    // Em modo stub não há cookie a invalidar. O endpoint existe para o
+    // frontend não precisar saber disso.
   }
 }

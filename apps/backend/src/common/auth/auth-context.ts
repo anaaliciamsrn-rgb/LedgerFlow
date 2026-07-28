@@ -15,6 +15,4 @@ export interface AuthContext {
 export interface RequestWithAuth {
   auth?: AuthContext;
   headers: Record<string, string | string[] | undefined>;
-  /** Preenchido pelo `cookie-parser`; ausente se o middleware não rodou. */
-  cookies?: Record<string, string | undefined>;
 }

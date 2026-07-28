@@ -38,30 +38,6 @@ model Tenant {
   auditRuns     AuditRun[]
   obligations   Obligation[]
   collaborators Collaborator[]
-  users         User[]
-}
-
-/// Conta de acesso ao sistema. Distinta de `Collaborator`, que é apenas um
-/// rótulo com cor para organizar tarefas — nem todo responsável tem login,
-/// e nem todo usuário aparece no calendário.
-model User {
-  id       String @id @default(cuid())
-  tenantId String
-  name     String
-  /// Único no sistema inteiro: é por ele que o login descobre o tenant.
-  email    String @unique
-  /// Hash bcrypt. A senha em claro nunca é gravada nem registrada em log.
-  passwordHash String
-  role     String  @default("viewer") // owner | admin | accountant | viewer
-  /// Desativado não entra, mas preserva o histórico em ActivityLog.
-  active   Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  @@index([tenantId])
 }
 
 // ─────────────────────────────────────────────────────────────
