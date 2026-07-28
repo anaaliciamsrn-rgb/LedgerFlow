@@ -15,7 +15,12 @@ services:
     runtime: node
     plan: free
     rootDir: apps/backend
-    buildCommand: npm ci && npx prisma generate && npm run build
+    # `--include=dev` é obrigatório: as variáveis do serviço valem também no
+    # build, e com NODE_ENV=production o npm descarta as dependências de
+    # desenvolvimento — que é justamente onde vivem @nestjs/cli, prisma e
+    # typescript. Sem isso o Render instala, joga fora o compilador e depois
+    # tenta compilar.
+    buildCommand: npm ci --include=dev && npx prisma generate && npm run build
     # `migrate deploy` cria as tabelas na primeira subida e não faz nada nas
     # seguintes — dispensa rodar migration à mão a cada deploy.
     startCommand: npx prisma migrate deploy && npm run start:prod
