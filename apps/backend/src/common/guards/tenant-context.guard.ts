@@ -5,6 +5,9 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { SESSION_COOKIE } from '../../auth/session-cookie';
+import type { JwtPayload } from '../../auth/auth.schema';
 import type {
   AuthContext,
   RequestWithAuth,
@@ -32,21 +35,25 @@ function toRole(value: string | undefined, fallback: UserRole): UserRole {
 /**
  * Popula `req.auth` com o AuthContext.
  *
- * - AUTH_MODE=stub: lê os headers x-tenant-id / x-user-id / x-role,
- *   caindo para os defaults de ambiente (STUB_*). Facilita dev e testes.
- * - AUTH_MODE=jwt: ponto de integração com a Infra (validação real do
- *   cookie/JWT). Enquanto a Infra não entrega, mantém-se em stub.
+ * - AUTH_MODE=jwt: valida o token do cookie httpOnly emitido no login.
+ * - AUTH_MODE=stub: lê os headers x-tenant-id / x-user-id / x-role, caindo
+ *   para os defaults de ambiente. Só existe para desenvolvimento e testes —
+ *   qualquer cliente escolheria o próprio tenant. `validateEnv` recusa este
+ *   modo quando NODE_ENV=production.
  */
 @Injectable()
 export class TenantContextGuard implements CanActivate {
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly jwt: JwtService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<RequestWithAuth>();
     const mode = this.config.get<string>('AUTH_MODE') ?? 'stub';
 
     const auth =
-      mode === 'jwt' ? this.fromJwt(req) : this.fromStub(req);
+      mode === 'jwt' ? await this.fromJwt(req) : this.fromStub(req);
 
     if (!auth) {
       throw new UnauthorizedException('Contexto de autenticação ausente');
@@ -73,11 +80,29 @@ export class TenantContextGuard implements CanActivate {
     return { tenantId, userId, role };
   }
 
-  private fromJwt(_req: RequestWithAuth): AuthContext | null {
-    // TODO(integração-infra): validar o cookie/JWT emitido pela frente de
-    // Infra e extrair { userId, tenantId, role } do Membership.
-    throw new UnauthorizedException(
-      'AUTH_MODE=jwt ainda não integrado com a base de Infra/Auth',
-    );
+  /**
+   * O token vem do cookie httpOnly, nunca de header ou corpo: assim o
+   * JavaScript da página não o alcança, e um XSS não consegue roubá-lo.
+   */
+  private async fromJwt(req: RequestWithAuth): Promise<AuthContext | null> {
+    const token = req.cookies?.[SESSION_COOKIE];
+    if (!token) {
+      return null;
+    }
+
+    try {
+      const payload = await this.jwt.verifyAsync<JwtPayload>(token);
+      if (!payload.sub || !payload.tenantId) {
+        return null;
+      }
+      return {
+        userId: payload.sub,
+        tenantId: payload.tenantId,
+        role: toRole(payload.role, 'viewer'),
+      };
+    } catch {
+      // Token expirado, adulterado ou assinado com outra chave.
+      return null;
+    }
   }
 }
