@@ -13,8 +13,25 @@ jobs:
     defaults:
       run:
         working-directory: apps/backend
+    # PostgreSQL de verdade. O SQLite anterior escondia diferenças que só
+    # apareceriam em producao — a comparacao de texto, por exemplo, ignora
+    # maiusculas no SQLite e as diferencia no Postgres.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ledgerflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
-      DATABASE_URL: 'file:./ci.db'
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ledgerflow_test'
       AUTH_MODE: 'stub'
       STUB_TENANT_ID: 'tnt_test'
       STUB_USER_ID: 'usr_test'
@@ -66,11 +83,25 @@ jobs:
   e2e:
     name: Frontend E2E (Playwright)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ledgerflow_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       NEXT_PUBLIC_API_URL: 'http://localhost:3333/api'
       NEXT_PUBLIC_USE_MOCKS: 'false'
       NEXT_PUBLIC_API_TIMEOUT: '30000'
-      DATABASE_URL: 'file:./e2e.db'
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ledgerflow_e2e'
       AUTH_MODE: 'stub'
       # Precisa bater com o TENANT_ID do seed, senao o guard resolve um tenant
       # sem dado nenhum e a tela abre vazia.

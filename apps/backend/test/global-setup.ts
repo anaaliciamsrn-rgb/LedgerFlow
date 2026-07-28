@@ -1,19 +1,31 @@
 import { execSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Recria o schema no banco de teste (SQLite) uma vez antes da suíte e2e.
+/**
+ * Aplica o schema no banco de teste antes da suíte e2e.
+ *
+ * Exige um PostgreSQL alcançável em `DATABASE_URL`. Na CI é um container de
+ * verdade; localmente, um Postgres instalado ou um banco gerenciado gratuito
+ * (Neon, Supabase) — ver docs/DEPLOY.md.
+ *
+ * A mensagem abaixo existe porque o erro cru do Prisma ("P1001") não diz o que
+ * fazer, e essa era a primeira pedra no caminho de quem clona o projeto.
+ */
 export default function globalSetup(): void {
-  const testDbUrl = 'file:./test.db';
-  const testDbPath = join(__dirname, '..', 'prisma', 'test.db');
+  const url = process.env.DATABASE_URL;
 
-  if (existsSync(testDbPath)) {
-    rmSync(testDbPath);
+  if (!url?.startsWith('postgres')) {
+    throw new Error(
+      'Os testes e2e precisam de um PostgreSQL. Defina DATABASE_URL apontando ' +
+        'para um banco de teste, por exemplo:\n' +
+        '  DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ledgerflow_test"\n' +
+        'Ver docs/DEPLOY.md para as opções sem instalar nada.',
+    );
   }
 
   execSync('npx prisma db push --skip-generate --accept-data-loss', {
     cwd: join(__dirname, '..'),
-    env: { ...process.env, DATABASE_URL: testDbUrl },
+    env: { ...process.env, DATABASE_URL: url },
     stdio: 'inherit',
   });
 }

@@ -86,9 +86,12 @@ export class CompaniesService {
 
     const where: Prisma.CompanyWhereInput = { tenantId };
     if (search) {
+      // `insensitive` é obrigatório no Postgres: sem ele, procurar por
+      // "petrobras" não encontra "PETROBRAS". O SQLite anterior ignorava
+      // maiúsculas por conta própria e escondia essa necessidade.
       where.OR = [
-        { name: { contains: search } },
-        { tradeName: { contains: search } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { tradeName: { contains: search, mode: 'insensitive' } },
         { cnpj: { contains: search } },
       ];
     }
