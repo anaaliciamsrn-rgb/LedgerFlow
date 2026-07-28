@@ -1,0 +1,43 @@
+# Configuração do backend no Render (plano gratuito).
+#
+# Existe para tirar da mão os campos que mais derrubam o deploy: o diretório
+# raiz — o repositório guarda dois projetos — e os comandos de build e de
+# arranque. Com este arquivo, o Render lê tudo pronto em vez de depender de
+# alguém preencher formulário sem errar.
+#
+# Como usar: no Render, New -> Blueprint -> aponte para este repositório.
+#
+# `PORT` não aparece de propósito: o Render injeta a dele, e fixar um valor
+# deixa o serviço inacessível.
+services:
+  - type: web
+    name: ledgerflow-api
+    runtime: node
+    plan: free
+    rootDir: apps/backend
+    buildCommand: npm ci && npx prisma generate && npm run build
+    # `migrate deploy` cria as tabelas na primeira subida e não faz nada nas
+    # seguintes — dispensa rodar migration à mão a cada deploy.
+    startCommand: npx prisma migrate deploy && npm run start:prod
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # O sistema não tem autenticação: o escritório vem do header
+      # x-tenant-id. Decisão do projeto — a API sobe pública e avisa no log.
+      - key: AUTH_MODE
+        value: stub
+      - key: BRASILAPI_BASE_URL
+        value: https://brasilapi.com.br/api
+      - key: STUB_TENANT_ID
+        value: tnt_dev
+      - key: STUB_USER_ID
+        value: usr_dev
+      - key: STUB_ROLE
+        value: owner
+      # Preenchidos no painel: o primeiro é segredo, o segundo só se conhece
+      # depois que o site existir no Vercel.
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
