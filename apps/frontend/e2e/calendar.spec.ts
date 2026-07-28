@@ -11,8 +11,31 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
  */
 const API = 'http://localhost:3333/api';
 
+const CREDENCIAIS = {
+  email: process.env.E2E_USER_EMAIL ?? 'admin@contabilidademodelo.com.br',
+  password: process.env.E2E_USER_PASSWORD ?? 'trocar-esta-senha',
+};
+
 interface Criada {
   readonly id: string;
+}
+
+/**
+ * Autentica usando `page.request`, e não o fixture `request` isolado: assim o
+ * cookie de sessão entra no contexto do navegador. Como cookie ignora porta,
+ * o mesmo `lf_session` serve ao middleware do Next (porta do site) e às
+ * chamadas à API (porta do backend).
+ */
+async function entrar(page: import('@playwright/test').Page): Promise<void> {
+  const resposta = await page.request.post(`${API}/auth/login`, {
+    data: CREDENCIAIS,
+  });
+  if (!resposta.ok()) {
+    throw new Error(
+      `login falhou (HTTP ${resposta.status()}). Rode o seed do backend: ` +
+        `npm run db:seed em apps/backend.`,
+    );
+  }
 }
 
 async function primeiroResponsavel(request: APIRequestContext): Promise<string> {
@@ -29,6 +52,7 @@ async function primeiroResponsavel(request: APIRequestContext): Promise<string> 
 
 test.describe('Calendário — tarefas recorrentes', () => {
   test.beforeEach(async ({ page }) => {
+    await entrar(page);
     await page.goto('/calendar');
     await expect(
       page.getByRole('heading', { name: 'Calendário contábil' }),
@@ -41,12 +65,11 @@ test.describe('Calendário — tarefas recorrentes', () => {
    * falhar por um motivo que não é defeito nenhum. No fim, conclui a tarefa
    * para não deixar atraso pendurado na tela.
    */
-  test('mostra a faixa de atrasadas com data e responsável', async ({
-    page,
-    request,
-  }) => {
-    const collaboratorId = await primeiroResponsavel(request);
-    const criacao = await request.post(`${API}/calendar/obligations`, {
+  test('mostra a faixa de atrasadas com data e responsável', async ({ page }) => {
+    // `page.request` e não o fixture `request`: só o contexto da página tem o
+    // cookie de sessão, e sem ele a API responde 401.
+    const collaboratorId = await primeiroResponsavel(page.request);
+    const criacao = await page.request.post(`${API}/calendar/obligations`, {
       data: {
         title: 'Tarefa vencida (fixture de teste)',
         type: 'DOCUMENTOS',
@@ -70,9 +93,10 @@ test.describe('Calendário — tarefas recorrentes', () => {
       // Concluída sai da faixa; roda mesmo se a asserção acima falhar.
       // A limpeza é verificada: falha silenciosa aqui deixaria a tarefa
       // pendurada na faixa e o próximo teste herdaria o lixo.
-      const limpeza = await request.patch(`${API}/calendar/obligations/${id}`, {
-        data: { status: 'completed' },
-      });
+      const limpeza = await page.request.patch(
+        `${API}/calendar/obligations/${id}`,
+        { data: { status: 'completed' } },
+      );
       expect(
         limpeza.ok(),
         `limpeza da tarefa ${id} falhou: HTTP ${limpeza.status()} ${await limpeza.text()}`,

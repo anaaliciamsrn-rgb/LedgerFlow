@@ -44,9 +44,20 @@ Variáveis obrigatórias:
 | `NODE_ENV` | `production` |
 | `DATABASE_URL` | a URL do Postgres |
 | `AUTH_MODE` | `jwt` |
+| `JWT_SECRET` | chave com 32+ caracteres (ver abaixo) |
 | `CORS_ORIGINS` | `https://seu-app.vercel.app` |
 | `BRASILAPI_BASE_URL` | `https://brasilapi.com.br/api` |
+| `SEED_USER_EMAIL` / `SEED_USER_PASSWORD` | credenciais do primeiro acesso |
 | `PORT` | o que a hospedagem indicar |
+
+Gere a chave de assinatura assim, e guarde-a só no painel da hospedagem:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+Sem `SEED_USER_PASSWORD`, o seed cria o usuário com a senha de desenvolvimento
+`trocar-esta-senha` — que está escrita neste repositório e, portanto, é pública.
 
 Comandos:
 
@@ -58,13 +69,36 @@ npm run start:prod
 ```
 
 **O processo se recusa a subir** se `NODE_ENV=production` vier com
-`AUTH_MODE=stub` ou sem `CORS_ORIGINS`. É proposital: em modo stub o tenant vem
-do header `x-tenant-id`, ou seja, quem souber a URL lê a carteira de qualquer
-escritório. Melhor não subir do que subir aberto.
+`AUTH_MODE=stub`, sem `CORS_ORIGINS`, ou com `AUTH_MODE=jwt` sem `JWT_SECRET`
+de 32+ caracteres. É proposital: em modo stub o tenant vem do header
+`x-tenant-id`, ou seja, quem souber a URL lê a carteira de qualquer escritório.
+Melhor não subir do que subir aberto.
 
-> **`AUTH_MODE=jwt` ainda não está implementado** — hoje lança
-> `UnauthorizedException`. Ou seja: **não há como publicar o backend em
-> produção com segurança até que a autenticação real exista.** Ver §5.
+### O cookie de sessão e a escolha de domínio
+
+O token vive num cookie `httpOnly` — o JavaScript da página não o alcança, e um
+XSS não o rouba. Isso traz uma consequência para o deploy:
+
+- **Mesmo domínio (recomendado):** o frontend chama `/api/...` e o Vercel
+  reencaminha para o backend por um *rewrite*. O cookie é first-party,
+  `SameSite=Lax` basta e o CORS deixa de existir como problema.
+- **Domínios diferentes:** `seu-app.vercel.app` chamando `seu-backend.onrender.com`
+  faz do cookie um third-party. É preciso `CROSS_SITE_COOKIE=true` (que muda o
+  cookie para `SameSite=None`) e os navegadores vêm restringindo esse tipo de
+  cookie — o login pode simplesmente parar de funcionar sem aviso.
+
+Por isso a recomendação é o primeiro arranjo. Para adotá-lo, acrescente ao
+`next.config.ts` do frontend:
+
+```ts
+async rewrites() {
+  return [
+    { source: '/api/:path*', destination: `${process.env.BACKEND_URL}/api/:path*` },
+  ];
+}
+```
+
+e aponte `NEXT_PUBLIC_API_URL` para `/api` do próprio site.
 
 ## 3. Frontend no Vercel
 
@@ -100,16 +134,22 @@ Depois do primeiro deploy, volte ao backend e ponha o domínio real do Vercel em
 
 Em ordem de urgência:
 
-1. **Autenticação real.** `AUTH_MODE=jwt` não está implementado. Sem isso não
-   existe produção segura — só ambiente interno com acesso restrito.
-2. **Migração para Postgres.** Trocar o `provider`, gerar migration inicial
-   nova e migrar os dados existentes, se houver.
-3. **Busca insensível a maiúsculas.** O SQLite compara texto sem diferenciar
+1. **Migração para Postgres.** O `schema.prisma` ainda usa `provider = "sqlite"`
+   e as migrations são SQL de SQLite. É o que falta para o backend sair do ar
+   local.
+2. **Busca insensível a maiúsculas.** O SQLite compara texto sem diferenciar
    caixa; o Postgres diferencia. Sem `mode: 'insensitive'` nos `contains` de
    `companies.service.ts` e `dashboard.service.ts`, procurar por "petrobras"
    deixa de encontrar "PETROBRAS".
-4. **Limite de requisições.** Não há rate limit; a API fica exposta a abuso.
+3. **Limite de tentativas de login.** Não há rate limit: a senha fica exposta a
+   força bruta. O bcrypt de custo 12 (~700ms por tentativa) atrasa o ataque,
+   mas não o impede.
+4. **Troca e recuperação de senha.** Hoje só o seed cria usuário; não há tela
+   para trocar a própria senha nem para recuperá-la.
 5. **Retenção de auditoria.** `AuditRun`/`AuditFinding` crescem sem expurgo.
+
+Já resolvido: a autenticação real (`AUTH_MODE=jwt`) existe e é exercitada por
+testes que sobem a aplicação nesse modo.
 
 ## Desenvolvimento local
 
