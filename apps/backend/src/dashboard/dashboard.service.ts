@@ -157,9 +157,12 @@ export class DashboardService {
   ): Promise<PortfolioDto> {
     const where: Prisma.CompanyWhereInput = { tenantId };
     if (query.search) {
+      // Mesma regra da listagem: no Postgres, `contains` diferencia
+      // maiúsculas, então o filtro do dashboard precisa de `insensitive`
+      // para concordar com a busca da tela de empresas.
       where.OR = [
-        { name: { contains: query.search } },
-        { tradeName: { contains: query.search } },
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { tradeName: { contains: query.search, mode: 'insensitive' } },
         { cnpj: { contains: query.search } },
       ];
     }

@@ -155,8 +155,8 @@ describe('Calendar (e2e)', () => {
     });
   });
 
-  describe('overdueOnly', () => {
-    it('devolve as pendentes vencidas ignorando from/to', async () => {
+  describe('GET /api/calendar/obligations/overdue', () => {
+    it('devolve as pendentes vencidas de qualquer mês, com o total real', async () => {
       await ctx.prisma.obligation.createMany({
         data: [
           tarefa({
@@ -180,14 +180,71 @@ describe('Calendar (e2e)', () => {
       });
 
       const response = await http()
-        .get('/api/calendar/obligations')
-        .query({ overdueOnly: 'true', from: '2026-01-01', to: '2026-01-31' })
+        .get('/api/calendar/obligations/overdue')
         .expect(200);
 
-      expect(response.body.data.map((o: { title: string }) => o.title)).toEqual([
-        'Vencida antiga',
-        'Vencida recente',
-      ]);
+      expect(response.body.data.total).toBe(2);
+      expect(
+        response.body.data.items.map((o: { title: string }) => o.title),
+      ).toEqual(['Vencida antiga', 'Vencida recente']);
+    });
+
+    it('nunca devolve atrasadas de outro escritório', async () => {
+      await ctx.prisma.obligation.create({
+        data: tarefa({
+          tenantId: TENANT_B,
+          collaboratorId: externo.id,
+          title: 'Atraso alheio',
+          dueDate: new Date('2020-03-10T00:00:00Z'),
+        }),
+      });
+
+      const response = await http()
+        .get('/api/calendar/obligations/overdue')
+        .expect(200);
+
+      expect(response.body.data.total).toBe(0);
+      expect(response.body.data.items).toEqual([]);
+    });
+  });
+
+  describe('PATCH — tipo da tarefa', () => {
+    it('permite corrigir o tipo depois de criada', async () => {
+      const criada = await ctx.prisma.obligation.create({
+        data: tarefa({ type: 'FOLHA' }),
+      });
+
+      const response = await http()
+        .patch(`/api/calendar/obligations/${criada.id}`)
+        .send({ type: 'GUIAS' })
+        .expect(200);
+
+      expect(response.body.data.type).toBe('GUIAS');
+    });
+
+    it('limpa a descrição livre ao sair do tipo OUTRO', async () => {
+      const criada = await ctx.prisma.obligation.create({
+        data: tarefa({ type: 'OUTRO', customType: 'Baixa de protocolo' }),
+      });
+
+      const response = await http()
+        .patch(`/api/calendar/obligations/${criada.id}`)
+        .send({ type: 'CONFERENCIA' })
+        .expect(200);
+
+      expect(response.body.data.type).toBe('CONFERENCIA');
+      expect(response.body.data.customType).toBeNull();
+    });
+
+    it('exige descrição ao mudar para OUTRO', async () => {
+      const criada = await ctx.prisma.obligation.create({
+        data: tarefa({ type: 'FOLHA' }),
+      });
+
+      await http()
+        .patch(`/api/calendar/obligations/${criada.id}`)
+        .send({ type: 'OUTRO' })
+        .expect(422);
     });
   });
 
@@ -213,6 +270,41 @@ describe('Calendar (e2e)', () => {
         recurrenceGroupId: null,
         holidayConflict: null,
       });
+    });
+
+    it('devolve só a tarefa criada quando já existe outra com mesmo título e data', async () => {
+      // Duas empresas com "Conferência mensal" no dia 10 é rotina de
+      // escritório. A versão anterior rebuscava por título + data e devolvia
+      // as duas, fazendo a tela anunciar "2 tarefas criadas".
+      const primeira = await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'Conferência mensal',
+          type: 'CONFERENCIA',
+          dueDate: '2026-03-10',
+          collaboratorId: ana.id,
+        })
+        .expect(201);
+
+      const segunda = await http()
+        .post('/api/calendar/obligations')
+        .send({
+          title: 'Conferência mensal',
+          type: 'CONFERENCIA',
+          dueDate: '2026-03-10',
+          collaboratorId: bruno.id,
+        })
+        .expect(201);
+
+      expect(segunda.body.data).toHaveLength(1);
+      expect(segunda.body.data[0].id).not.toBe(primeira.body.data[0].id);
+      expect(segunda.body.data[0].collaborator.id).toBe(bruno.id);
+
+      // As duas continuam existindo — o problema era o retorno, não a escrita.
+      const total = await ctx.prisma.obligation.count({
+        where: { tenantId: TENANT_A, title: 'Conferência mensal' },
+      });
+      expect(total).toBe(2);
     });
 
     it('materializa 3 ocorrências mensais no mesmo grupo', async () => {

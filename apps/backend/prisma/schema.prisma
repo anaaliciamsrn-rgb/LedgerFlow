@@ -1,19 +1,23 @@
 // Prisma schema — Core do Backend (LedgerFlow)
 //
-// Provider = sqlite apenas para dev/testes do Core (sem Docker/Postgres ainda).
-// Quando a frente de Infra entregar o Postgres, trocar `provider` para
-// "postgresql" e o DATABASE_URL. As queries do Core são portáveis (sem SQL
-// específico de Postgres — RLS/policies são responsabilidade da Infra).
+// Provider = postgresql. O SQLite anterior guardava o banco num arquivo dentro
+// do projeto, e arquivo não sobrevive a uma hospedagem: o servidor é recriado
+// a cada deploy e pode rodar em várias cópias, cada uma com o seu arquivo.
+// Os dados do cliente sumiriam sozinhos.
 //
-// Enums são modelados como String porque o SQLite não suporta enums no Prisma.
-// A validação dos valores é feita na camada de aplicação (Zod).
+// Para desenvolver não é preciso instalar Postgres nem Docker:
+// `npm run db:local` sobe um PostgreSQL de verdade compilado para WebAssembly
+// numa porta local. Produção usa um Postgres gerenciado.
+//
+// Enums permanecem modelados como String — a validação dos valores vive na
+// camada de aplicação (Zod), que é onde estão as mensagens em português.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

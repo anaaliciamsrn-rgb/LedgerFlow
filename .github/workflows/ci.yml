@@ -13,8 +13,25 @@ jobs:
     defaults:
       run:
         working-directory: apps/backend
+    # PostgreSQL de verdade. O SQLite anterior escondia diferenças que só
+    # apareceriam em producao — a comparacao de texto, por exemplo, ignora
+    # maiusculas no SQLite e as diferencia no Postgres.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ledgerflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
-      DATABASE_URL: 'file:./ci.db'
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ledgerflow_test'
       AUTH_MODE: 'stub'
       STUB_TENANT_ID: 'tnt_test'
       STUB_USER_ID: 'usr_test'
@@ -60,24 +77,81 @@ jobs:
       - name: Build
         run: npm run build
 
+  # O E2E exercita a tela contra a API de verdade. Com NEXT_PUBLIC_USE_MOCKS=true
+  # e sem backend, os testes do calendario falhavam: eles criam a propria massa
+  # de dados via API justamente para nao depender do estado do seed.
   e2e:
     name: Frontend E2E (Playwright)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/frontend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ledgerflow_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       NEXT_PUBLIC_API_URL: 'http://localhost:3333/api'
-      NEXT_PUBLIC_USE_MOCKS: 'true'
+      NEXT_PUBLIC_USE_MOCKS: 'false'
       NEXT_PUBLIC_API_TIMEOUT: '30000'
+      DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ledgerflow_e2e'
+      AUTH_MODE: 'stub'
+      # Precisa bater com o TENANT_ID do seed, senao o guard resolve um tenant
+      # sem dado nenhum e a tela abre vazia.
+      STUB_TENANT_ID: 'tnt_dev'
+      STUB_USER_ID: 'usr_dev'
+      # BrasilAPI falsa: a real deixaria a CI refem da rede e do rate limit de
+      # terceiro, e sem feriado algum o teste do aviso de feriado nao teria o
+      # que verificar.
+      BRASILAPI_BASE_URL: 'http://localhost:4444/api'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install
+
+      - name: Install backend
+        working-directory: apps/backend
+        run: npm ci
+      - name: Prepare database
+        working-directory: apps/backend
+        run: npx prisma migrate deploy && npx prisma generate
+      - name: Seed
+        working-directory: apps/backend
+        run: npm run db:seed
+      - name: Build backend
+        working-directory: apps/backend
+        run: npm run build
+      - name: Start fake BrasilAPI
+        working-directory: apps/backend
+        run: node test/fake-brasilapi.mjs 4444 &
+      - name: Start backend
+        working-directory: apps/backend
+        run: |
+          npm run start:prod &
+          for attempt in $(seq 1 60); do
+            if curl -sf http://localhost:3333/api/health > /dev/null; then
+              echo "backend no ar"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "backend nao subiu em 60s"
+          exit 1
+
+      - name: Install frontend
+        working-directory: apps/frontend
         run: npm ci
       - name: Install Playwright browser
+        working-directory: apps/frontend
         run: npx playwright install --with-deps chromium
       - name: E2E tests
+        working-directory: apps/frontend
         run: npm run e2e

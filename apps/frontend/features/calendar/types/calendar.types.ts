@@ -61,6 +61,15 @@ export interface Obligation {
   readonly createdAt: string;
 }
 
+/**
+ * Atrasadas de qualquer mês. `total` é a contagem real e pode ser maior que
+ * `items.length` — o servidor limita a lista, mas conta tudo.
+ */
+export interface Overdue {
+  readonly total: number;
+  readonly items: readonly Obligation[];
+}
+
 export interface CreateObligationInput {
   readonly title: string;
   readonly type: ObligationType;
@@ -74,6 +83,8 @@ export interface CreateObligationInput {
 
 export interface UpdateObligationInput {
   readonly title?: string;
+  readonly type?: ObligationType;
+  readonly customType?: string | null;
   readonly dueDate?: string;
   readonly status?: ObligationStatus;
   readonly action?: 'anticipate';

@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { cookies } from 'next/headers';
 import { Inter } from 'next/font/google';
 import { AppProviders } from '@/providers/app-providers';
-import { Toaster } from '@/components/ui/sonner';
 import { authService } from '@/features/auth/services/auth.service';
 import { buildTenantCssVariables, cssVariablesToStyle } from '@/styles/themes';
 import { A11Y_COOKIE_NAME } from '@/features/settings/types/a11y.types';
@@ -42,8 +41,6 @@ export default async function RootLayout({
       <body style={themeStyle} className="min-h-screen bg-background font-sans antialiased">
         <AppProviders session={session} a11yPreferences={a11yPreferences}>
           {children}
-          {/* Estava instalado mas nunca renderizado: sem ele, nenhum toast aparece. */}
-          <Toaster />
         </AppProviders>
       </body>
     </html>

@@ -13,6 +13,7 @@ import {
   type ListObligationsQuery,
   type ObligationDto,
   type ObligationWithRelations,
+  type OverdueDto,
   type UpdateObligationInput,
 } from './calendar.schema';
 
@@ -41,21 +42,47 @@ export class CalendarService {
   ): Promise<ObligationDto[]> {
     const now = new Date();
 
-    // `overdueOnly` é um modo próprio: ignora o intervalo do mês exibido,
-    // porque a faixa do topo mostra atraso de qualquer mês.
-    const where: Prisma.ObligationWhereInput = query.overdueOnly
-      ? { tenantId, status: 'pending', dueDate: { lt: now } }
-      : this.buildRangeWhere(tenantId, query);
-
     const rows = await this.prisma.obligation.findMany({
-      where,
+      where: this.buildRangeWhere(tenantId, query),
       orderBy: { dueDate: 'asc' },
       include: WITH_RELATIONS,
-      ...(query.overdueOnly ? { take: OVERDUE_LIMIT } : {}),
     });
 
     const holidays = await this.holidaysForYearsOf(rows);
     return rows.map((row) => toObligationDto(row, now, holidays));
+  }
+
+  /**
+   * Tarefas vencidas e ainda pendentes, de **qualquer** mês — a faixa do topo
+   * não depende do mês exibido na grade.
+   *
+   * `total` vem de um `count` sem teto, enquanto `items` é limitado a
+   * {@link OVERDUE_LIMIT}. Contar `items` faria a faixa anunciar "100 tarefas
+   * em atraso" havendo 300.
+   */
+  async listOverdue(tenantId: string): Promise<OverdueDto> {
+    const now = new Date();
+    const where: Prisma.ObligationWhereInput = {
+      tenantId,
+      status: 'pending',
+      dueDate: { lt: now },
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.obligation.count({ where }),
+      this.prisma.obligation.findMany({
+        where,
+        orderBy: { dueDate: 'asc' },
+        include: WITH_RELATIONS,
+        take: OVERDUE_LIMIT,
+      }),
+    ]);
+
+    const holidays = await this.holidaysForYearsOf(rows);
+    return {
+      total,
+      items: rows.map((row) => toObligationDto(row, now, holidays)),
+    };
   }
 
   private buildRangeWhere(
@@ -107,27 +134,35 @@ export class CalendarService {
     const recurrenceGroupId =
       input.recurrence === 'none' ? null : createRecurrenceGroupId();
 
-    await this.prisma.obligation.createMany({
-      data: dates.map((dueDate) => ({
-        tenantId,
-        title: input.title,
-        type: input.type,
-        customType: input.customType ?? null,
-        dueDate,
-        companyId: input.companyId ?? null,
-        collaboratorId: input.collaboratorId,
-        recurrence: input.recurrence,
-        recurrenceGroupId,
-      })),
-    });
-
-    const created = await this.prisma.obligation.findMany({
-      where: recurrenceGroupId
-        ? { tenantId, recurrenceGroupId }
-        : { tenantId, title: input.title, dueDate: dates[0] },
-      orderBy: { dueDate: 'asc' },
-      include: WITH_RELATIONS,
-    });
+    /**
+     * Um `create` por ocorrência, dentro de uma transação.
+     *
+     * A versão anterior usava `createMany` — que não devolve as linhas — e
+     * depois rebuscava por `title + dueDate`. Duas tarefas com o mesmo título
+     * no mesmo dia (ex.: "Conferência mensal" de duas empresas no dia 10) e a
+     * consulta trazia as duas: o usuário cadastrava uma tarefa e a tela
+     * anunciava "2 tarefas criadas", devolvendo linhas que não eram dele.
+     *
+     * O teto de 24 ocorrências mantém a transação pequena.
+     */
+    const created = await this.prisma.$transaction(
+      dates.map((dueDate) =>
+        this.prisma.obligation.create({
+          data: {
+            tenantId,
+            title: input.title,
+            type: input.type,
+            customType: input.customType ?? null,
+            dueDate,
+            companyId: input.companyId ?? null,
+            collaboratorId: input.collaboratorId,
+            recurrence: input.recurrence,
+            recurrenceGroupId,
+          },
+          include: WITH_RELATIONS,
+        }),
+      ),
+    );
 
     await this.activity.record({
       tenantId,
@@ -156,9 +191,18 @@ export class CalendarService {
     if (action === 'anticipate') {
       data.dueDate = await this.anticipate(current.dueDate);
     }
+    // Sair de OUTRO apaga a descrição livre: mantê-la deixaria a tarefa com
+    // dois rótulos concorrentes, e a listagem escolheria o errado.
+    if (fields.type && fields.type !== 'OUTRO') {
+      data.customType = null;
+    }
 
+    // O `tenantId` volta no WHERE da escrita. `ensureOwned` já conferiu, mas
+    // entre a leitura e a escrita há uma janela; repetir o filtro fecha ela
+    // sem custo — `updateMany` não aceita `include`, daí o `update` com
+    // condição composta.
     const obligation = await this.prisma.obligation.update({
-      where: { id },
+      where: { id, tenantId },
       data,
       include: WITH_RELATIONS,
     });

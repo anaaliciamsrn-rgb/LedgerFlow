@@ -4,6 +4,7 @@ import { buildMockObligations } from '@/services/mocks/calendar.mock';
 import type {
   CreateObligationInput,
   Obligation,
+  Overdue,
   UpdateObligationInput,
 } from '@/features/calendar/types/calendar.types';
 import type { ApiResponse } from '@/types/api.types';
@@ -47,13 +48,18 @@ export const calendarService = {
     return response.data;
   },
 
-  /** Pendentes vencidas de qualquer mês — alimenta a faixa fixa do topo. */
-  async listOverdue(signal?: AbortSignal): Promise<readonly Obligation[]> {
+  /**
+   * Pendentes vencidas de qualquer mês — alimenta a faixa fixa do topo.
+   * `total` pode ser maior que `items.length`: o servidor limita a lista,
+   * mas conta tudo.
+   */
+  async listOverdue(signal?: AbortSignal): Promise<Overdue> {
     if (config.useMocks) {
-      return buildMockObligations().filter((item) => item.overdue);
+      const items = buildMockObligations().filter((item) => item.overdue);
+      return { total: items.length, items };
     }
-    const response = await httpClient.get<ApiResponse<readonly Obligation[]>>(
-      '/calendar/obligations?overdueOnly=true',
+    const response = await httpClient.get<ApiResponse<Overdue>>(
+      '/calendar/obligations/overdue',
       { signal },
     );
     return response.data;

@@ -58,32 +58,65 @@ export const createObligationSchema = z
   });
 export type CreateObligationInput = z.infer<typeof createObligationSchema>;
 
+/**
+ * `type` e `customType` são editáveis: quem erra o tipo no cadastro precisa
+ * poder corrigir sem apagar e recriar a tarefa. A dupla anda junta — trocar
+ * para `OUTRO` exige a descrição, e sair de `OUTRO` limpa a descrição antiga
+ * (o service converte a ausência em `null`, senão sobraria um rótulo órfão).
+ */
 export const updateObligationSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
+    type: obligationTypeSchema.optional(),
+    customType: z.string().trim().min(1).max(60).nullable().optional(),
     dueDate: z.coerce.date().optional(),
     status: obligationStatusSchema.optional(),
     /** Move o vencimento para o dia útil anterior. Calculado no servidor. */
     action: z.literal('anticipate').optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.type === 'OUTRO' && !value.customType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['customType'],
+        message: 'Descreva a tarefa quando o tipo for "Outro"',
+      });
+    }
+    if (value.type && value.type !== 'OUTRO' && value.customType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['customType'],
+        message: 'A descrição livre só vale para o tipo "Outro"',
+      });
+    }
+    if (value.customType && !value.type) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['type'],
+        message: 'Informe o tipo junto com a descrição',
+      });
+    }
+  });
 export type UpdateObligationInput = z.infer<typeof updateObligationSchema>;
-
-/** `'true'` explícito — `z.coerce.boolean()` transformaria `'false'` em `true`. */
-const booleanFlag = z
-  .enum(['true', 'false'])
-  .transform((value) => value === 'true')
-  .optional();
 
 export const listObligationsQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   status: obligationStatusSchema.optional(),
   collaboratorId: z.string().optional(),
-  /** Ignora `from`/`to` e devolve todas as pendentes vencidas. */
-  overdueOnly: booleanFlag,
 });
 export type ListObligationsQuery = z.infer<typeof listObligationsQuerySchema>;
+
+/**
+ * Atrasadas de qualquer mês. `total` é a contagem real; `items` vem limitado,
+ * porque a faixa do topo é um alerta e não uma listagem completa. Contar
+ * `items` faria a tela anunciar "100 em atraso" havendo 300.
+ */
+export interface OverdueDto {
+  readonly total: number;
+  readonly items: readonly ObligationDto[];
+}
 
 export const holidaysQuerySchema = z.object({
   year: z.coerce
